@@ -36,3 +36,6 @@ CLAUDE.md
 ## 参考文档
 - https://stagedog.github.io/青空莉/工具经验/实时编写前端界面或脚本/
 - SillyTavern 官方文档
+
+## 当前状态
+- 脚本尚未发布，无需向后兼容，重构需要干净

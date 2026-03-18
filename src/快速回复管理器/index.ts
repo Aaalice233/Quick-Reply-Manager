@@ -74,13 +74,18 @@
     tokens: { simultaneous: string; then: string };
     connectors: ConnectorButton[];
     toast: { maxStack: number; timeout: number };
-    defaults: { mode: 'append' | 'inject'; previewExpanded: boolean };
+    defaults: {
+      mode: 'append' | 'inject';
+      previewExpanded: boolean;
+      connectorPrefixMode: boolean;
+      connectorPrefixId: string | null;
+    };
     ui: { theme: string; customCSS: string };
   }
 
   interface UiState {
     sidebar: { expanded: Record<string, boolean>; width: number; collapsed: boolean };
-    preview: { expanded: boolean; height: number; tokens: Array<{ id: string; type: string; label: string }> };
+    preview: { expanded: boolean; height: number; tokens: Array<{ id: string; type: string; label: string; text?: string }> };
     panelSize: { width: number; height: number };
     lastPath: string[];
   }
@@ -106,9 +111,11 @@
     filter: string;
     contextMenu: HTMLElement | null;
     longPressTimer: ReturnType<typeof setTimeout> | null;
-    dragData: DragData | null;
     hostResizeHandler: (() => void) | null;
     resizeRaf: number | null;
+    inputSyncTarget: HTMLTextAreaElement | null;
+    inputSyncHandler: ((e: Event) => void) | null;
+    suspendInputSync: boolean;
   }
 
   function resolveHostWindow(): Window {
@@ -140,9 +147,11 @@
     filter: '',
     contextMenu: null,
     longPressTimer: null,
-    dragData: null,
     hostResizeHandler: null,
     resizeRaf: null,
+    inputSyncTarget: null,
+    inputSyncHandler: null,
+    suspendInputSync: false,
   };
 
   function uid(prefix: string): string {
@@ -290,7 +299,13 @@
     safe.settings!.defaults = safe.settings!.defaults || {
       mode: 'append',
       previewExpanded: true,
+      connectorPrefixMode: false,
+      connectorPrefixId: null,
     };
+    if (typeof safe.settings!.defaults.connectorPrefixMode !== 'boolean') {
+      safe.settings!.defaults.connectorPrefixMode = false;
+    }
+    safe.settings!.defaults.connectorPrefixId = safe.settings!.defaults.connectorPrefixId ?? null;
     safe.settings!.ui = safe.settings!.ui || { theme: 'herdi-light', customCSS: '' };
     if (!('customCSS' in safe.settings!.ui)) (safe.settings!.ui as any).customCSS = '';
 
@@ -444,6 +459,8 @@
         defaults: {
           mode: 'append',
           previewExpanded: true,
+          connectorPrefixMode: false,
+          connectorPrefixId: null,
         },
         ui: {
           theme: 'herdi-light',
@@ -486,6 +503,13 @@
     const style = pD.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
+@import url("https://fontsapi.zeoseven.com/292/main/result.css");
+
+body {
+  font-family: "LXGW WenKai";
+  font-weight: normal;
+}
+
 /* === CSS Variables Definition (herdi-light as default) === */
 #${OVERLAY_ID},.fp-panel{
   /* Layer 1 - Surface & Text */
@@ -644,7 +668,7 @@
 #${OVERLAY_ID} ::-webkit-scrollbar-track{background:transparent;border-radius:3px}
 #${OVERLAY_ID} ::-webkit-scrollbar-thumb{border-radius:3px;transition:background .2s}
 #${OVERLAY_ID} ::-webkit-scrollbar-corner{background:transparent}
-.fp-panel{position:relative;display:flex;flex-direction:column;border-radius:20px;overflow:hidden;border:1px solid var(--qr-border-1);background:var(--qr-bg-1);box-shadow:0 28px 70px var(--qr-shadow);color:var(--qr-text-1);font-family:'Manrope','Noto Sans SC','Segoe UI',sans-serif;flex-shrink:0;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);margin:8px auto;transition:background .3s ease,color .3s ease}
+.fp-panel{position:relative;display:flex;flex-direction:column;border-radius:20px;overflow:hidden;border:1px solid var(--qr-border-1);background:var(--qr-bg-1);box-shadow:0 28px 70px var(--qr-shadow);color:var(--qr-text-1);font-family:"LXGW WenKai","Noto Sans SC","Segoe UI",sans-serif;flex-shrink:0;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);margin:8px auto;transition:background .3s ease,color .3s ease}
 .fp-panel *{scrollbar-color:var(--qr-scrollbar) transparent}
 .fp-panel ::-webkit-scrollbar-thumb{background:var(--qr-scrollbar)}
 .fp-panel ::-webkit-scrollbar-thumb:hover{background:var(--qr-scrollbar-hover)}
@@ -652,19 +676,46 @@
 .fp-left,.fp-right{display:flex;align-items:center;gap:8px}
 .fp-right{justify-content:flex-end;min-width:0;overflow:auto}
 .fp-left{min-width:0;overflow:auto}
-.fp-btn{border:1px solid var(--qr-btn-border);background:var(--qr-btn-bg);color:var(--qr-text-1);border-radius:999px;padding:7px 13px;min-height:var(--qr-btn-h-md);cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;line-height:1.2;box-shadow:var(--qr-control-inset-shadow),var(--qr-control-rest-shadow);transform:translateY(0);transition:background .18s ease,border-color .18s ease,box-shadow .2s ease,transform .12s ease,opacity .15s ease}
-.fp-btn:hover{background:var(--qr-btn-hover-bg);border-color:var(--qr-btn-hover-border);box-shadow:var(--qr-control-inset-shadow),var(--qr-control-hover-shadow);transform:translateY(var(--qr-control-lift))}
+.fp-btn{border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));background:var(--qr-btn-bg,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023);border-radius:999px;padding:7px 13px;min-height:var(--qr-btn-h-md);cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;line-height:1.2;box-shadow:var(--qr-control-rest-shadow);transform:translateY(0);transition:background .18s ease,border-color .18s ease,box-shadow .2s ease,transform .12s ease,opacity .15s ease}
+.fp-btn:hover{background:var(--qr-btn-hover-bg);border-color:var(--qr-btn-hover-border);box-shadow:var(--qr-control-hover-shadow);transform:translateY(var(--qr-control-lift))}
 .fp-btn:active{transform:translateY(0) scale(var(--qr-control-press-scale))}
-.fp-btn:focus-visible{outline:none;box-shadow:var(--qr-control-inset-shadow),var(--qr-control-focus-shadow)}
-.fp-btn:disabled{opacity:.48;cursor:not-allowed;transform:none;box-shadow:var(--qr-control-inset-shadow)}
+.fp-btn:focus-visible{outline:none;box-shadow:var(--qr-control-focus-shadow)}
+.fp-btn:disabled{opacity:.48;cursor:not-allowed;transform:none;box-shadow:none}
 .fp-btn.primary{background:var(--qr-accent);border-color:var(--qr-accent);color:var(--qr-text-on-accent)}
 .fp-btn.icon-only{padding:6px 8px;min-height:var(--qr-btn-h-sm);min-width:var(--qr-btn-h-sm);display:inline-flex;align-items:center;justify-content:center}
 .fp-top .fp-btn{min-height:var(--qr-btn-h-sm);padding:6px 11px}
 .fp-top .fp-btn.icon-only{padding:6px 8px}
+.fp-top .fp-btn{box-shadow:0 1px 2px rgba(12,16,22,.10)}
+.fp-top .fp-btn:hover{box-shadow:0 2px 6px rgba(12,16,22,.14);transform:translateY(0)}
+.fp-top .fp-btn:active{box-shadow:0 1px 2px rgba(12,16,22,.08)}
 .fp-btn .fp-ico{width:14px;height:14px;display:inline-block;vertical-align:-2px;margin-right:6px}
 .fp-btn.icon-only .fp-ico{margin-right:0}
 .fp-title{font-weight:800;font-size:14px;letter-spacing:.2px;color:inherit;white-space:nowrap}
 .fp-quick-actions{display:flex;align-items:center;gap:7px;margin-left:4px}
+.fp-conn-btn{position:relative}
+.fp-conn-btn.is-selected{border-width:1px;font-weight:700}
+.fp-conn-btn.is-selected .fp-ico{filter:none}
+.fp-conn-orange.is-selected{background:#b66a17!important;border-color:#c27722!important;color:#fff7ec!important;box-shadow:0 0 0 1px rgba(255,255,255,.22) inset}
+.fp-conn-purple.is-selected{background:#6f52c7!important;border-color:#7b5dd8!important;color:#f7f2ff!important;box-shadow:0 0 0 1px rgba(255,255,255,.22) inset}
+.fp-conn-green.is-selected{background:#2d8e4f!important;border-color:#36a35d!important;color:#eefdf3!important;box-shadow:0 0 0 1px rgba(255,255,255,.22) inset}
+.fp-conn-blue.is-selected{background:#2f66c8!important;border-color:#3b76e2!important;color:#eff6ff!important;box-shadow:0 0 0 1px rgba(255,255,255,.22) inset}
+.fp-conn-red.is-selected{background:#ba4545!important;border-color:#cf5454!important;color:#fff3f3!important;box-shadow:0 0 0 1px rgba(255,255,255,.22) inset}
+.fp-conn-cyan.is-selected{background:#177f90!important;border-color:#1f93a6!important;color:#ecfdff!important;box-shadow:0 0 0 1px rgba(255,255,255,.22) inset}
+.fp-conn-btn.is-selected:hover{filter:brightness(1.03)}
+.fp-connector-switch{display:inline-flex;align-items:center;padding:0;border-radius:999px;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));background:var(--qr-btn-bg,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023);cursor:pointer;user-select:none;transition:background .18s ease,border-color .18s ease,box-shadow .18s ease}
+.fp-connector-switch:hover{background:var(--qr-btn-hover-bg);border-color:var(--qr-btn-hover-border)}
+.fp-connector-switch .fp-switch-track{position:relative;display:inline-flex;align-items:center;width:56px;height:24px;padding:0 8px;border-radius:999px;background:rgba(127,127,137,.24);transition:background .18s ease}
+.fp-connector-switch .fp-switch-label-off,.fp-connector-switch .fp-switch-label-on{position:absolute;font-size:10px;font-weight:700;letter-spacing:.25px;line-height:1;opacity:.72;transition:opacity .18s ease,color .18s ease}
+.fp-connector-switch .fp-switch-label-off{left:10px}
+.fp-connector-switch .fp-switch-label-on{right:10px}
+.fp-connector-switch .fp-switch-thumb{position:absolute;left:2px;top:2px;width:20px;height:20px;border-radius:50%;background:var(--qr-bg-3,#fff);box-shadow:none;transition:transform .2s cubic-bezier(.22,.8,.32,1),background .18s ease}
+.fp-connector-switch.is-on{border-color:var(--qr-accent);box-shadow:0 0 0 2px rgba(96,166,255,.16)}
+.fp-connector-switch.is-on .fp-switch-track{background:var(--qr-accent)}
+.fp-connector-switch.is-on .fp-switch-thumb{transform:translateX(32px);background:var(--qr-bg-3,#fff)}
+.fp-connector-switch.is-on .fp-switch-label-off{opacity:.4;color:var(--qr-text-on-accent,#fff)}
+.fp-connector-switch.is-on .fp-switch-label-on{opacity:1;color:var(--qr-text-on-accent,#fff)}
+.fp-connector-switch:not(.is-on) .fp-switch-label-off{opacity:1;color:var(--qr-text-1,#1f2023)}
+.fp-connector-switch:not(.is-on) .fp-switch-label-on{opacity:.45;color:var(--qr-text-1,#1f2023)}
 .fp-btn-then{background:var(--qr-conn-orange-bg);border-color:var(--qr-conn-orange-border);color:var(--qr-conn-orange-text)}
 .fp-btn-then:hover{background:var(--qr-conn-orange-hover-bg);border-color:var(--qr-conn-orange-hover-border)}
 .fp-btn-simul{background:var(--qr-conn-purple-bg);border-color:var(--qr-conn-purple-border);color:var(--qr-conn-purple-text)}
@@ -688,24 +739,39 @@
 .fp-path-link:last-child{font-weight:700;color:var(--qr-text-1)}
 .fp-body{flex:1;display:flex;min-height:0}
 .fp-sidebar{display:flex;flex-direction:column;border-right:1px solid var(--qr-sidebar-border);background:var(--qr-sidebar-bg);min-width:220px;max-width:520px}
-.fp-side-head{display:flex;gap:8px;padding:10px;border-bottom:1px solid var(--qr-border-2)}
-.fp-input{width:100%;padding:8px 12px;border:1px solid var(--qr-btn-border);border-radius:var(--qr-control-radius);min-height:var(--qr-control-min-h);background:var(--qr-bg-input);color:var(--qr-text-1);box-shadow:var(--qr-control-inset-shadow);transition:border-color .16s ease,box-shadow .18s ease,transform .12s ease,background .16s ease}
+.fp-side-head{display:flex;gap:6px;padding:10px;border-bottom:1px solid var(--qr-border-2);align-items:center}
+.fp-side-head .fp-input{flex:1;min-width:0}
+.fp-tree-tools{display:flex;gap:4px;align-items:center;flex:none}
+.fp-tree-tool-btn{width:24px;height:24px;padding:0;min-height:24px;border-radius:8px;border:1px solid var(--qr-border-2);background:transparent;color:var(--qr-text-2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:none;transition:border-color .15s ease,background .15s ease,color .15s ease,transform .12s ease}
+.fp-tree-tool-btn:hover{border-color:var(--qr-btn-hover-border);background:var(--qr-bg-hover);color:var(--qr-text-1)}
+.fp-tree-tool-btn:active{transform:scale(.96)}
+.fp-tree-tool-btn .fp-ico{width:12px;height:12px}
+.fp-input{width:100%;padding:8px 12px;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));border-radius:var(--qr-control-radius);min-height:var(--qr-control-min-h);background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023);box-shadow:none;transition:border-color .16s ease,box-shadow .18s ease,transform .12s ease,background .16s ease}
 .fp-input::placeholder{color:var(--qr-placeholder)}
-#${OVERLAY_ID} input:not([type="checkbox"]):not([type="radio"]),#${OVERLAY_ID} textarea,#${OVERLAY_ID} select{background:var(--qr-bg-input)!important;color:var(--qr-text-1)!important;border:1px solid var(--qr-btn-border)!important;border-radius:var(--qr-control-radius)!important;min-height:var(--qr-control-min-h)!important;box-shadow:var(--qr-control-inset-shadow)!important;outline:none!important;transition:border-color .16s ease,box-shadow .18s ease,transform .12s ease,background .16s ease}
+#${OVERLAY_ID} input:not([type="checkbox"]):not([type="radio"]),#${OVERLAY_ID} textarea,#${OVERLAY_ID} select{background:var(--qr-bg-input,var(--qr-bg-3,#fff))!important;color:var(--qr-text-1,#1f2023)!important;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28))!important;border-radius:var(--qr-control-radius)!important;min-height:var(--qr-control-min-h)!important;box-shadow:none!important;outline:none!important;transition:border-color .16s ease,box-shadow .18s ease,transform .12s ease,background .16s ease}
 #${OVERLAY_ID} input:not([type="checkbox"]):not([type="radio"])::placeholder,#${OVERLAY_ID} textarea::placeholder{color:var(--qr-placeholder)!important}
-#${OVERLAY_ID} input:not([type="checkbox"]):not([type="radio"]):focus,#${OVERLAY_ID} textarea:focus,#${OVERLAY_ID} select:focus{border-color:var(--qr-accent)!important;background:var(--qr-btn-hover-bg)!important;box-shadow:var(--qr-control-inset-shadow),var(--qr-control-focus-shadow)!important;transform:translateY(var(--qr-control-lift))}
+#${OVERLAY_ID} input:not([type="checkbox"]):not([type="radio"]):focus,#${OVERLAY_ID} textarea:focus,#${OVERLAY_ID} select:focus{border-color:var(--qr-accent)!important;background:var(--qr-btn-hover-bg)!important;box-shadow:var(--qr-control-focus-shadow)!important;transform:translateY(var(--qr-control-lift))}
 #${OVERLAY_ID} input:-webkit-autofill,#${OVERLAY_ID} input:-webkit-autofill:hover,#${OVERLAY_ID} input:-webkit-autofill:focus,#${OVERLAY_ID} textarea:-webkit-autofill,#${OVERLAY_ID} select:-webkit-autofill{-webkit-text-fill-color:var(--qr-text-1)!important;box-shadow:0 0 0 1000px var(--qr-bg-input) inset!important;transition:background-color 9999s ease-in-out 0s}
 .fp-tree{padding:8px;overflow:auto;flex:1}
+.fp-sidebar-foot{display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 10px;border-top:1px solid var(--qr-border-2);color:var(--qr-text-2);font-size:11px;text-align:center}
+.fp-sidebar-foot .name{font-weight:700;color:var(--qr-text-1)}
+.fp-sidebar-foot .ver{opacity:.78;font-variant-numeric:tabular-nums}
 .fp-tree-node{display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:10px;cursor:pointer;font-size:13px;color:var(--qr-tree-text);transition:background .15s ease,color .15s ease}
 .fp-tree-node:hover{background:var(--qr-bg-hover)}
 .fp-tree-node.active{background:var(--qr-tree-active-bg);color:var(--qr-tree-active-text)}
+.fp-tree-node.drop-target{outline:1px dashed var(--qr-accent);outline-offset:-1px}
+.fp-tree-node.is-pointer-dragging{opacity:1;filter:none}
 .fp-tree-indent{display:inline-block;width:12px;flex:none}
 .fp-main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--qr-main-bg)}
 .fp-main-scroll{flex:1;overflow:auto;padding:14px}
 .fp-group-title{font-weight:800;font-size:13px;color:inherit;margin:14px 0 8px}
 .fp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
-.fp-card{position:relative;border:1px solid var(--qr-card-border);border-radius:16px;padding:11px;background:var(--qr-card-bg);cursor:pointer;min-height:72px;box-shadow:0 1px 0 rgba(255,255,255,.03),0 2px 14px var(--qr-card-shadow);transition:transform .16s ease,box-shadow .18s ease,border-color .18s ease,background .16s ease}
+.fp-card{position:relative;border:1px solid var(--qr-card-border,rgba(120,120,130,.2));border-radius:16px;padding:11px;background:var(--qr-card-bg,var(--qr-bg-3,#fff));cursor:pointer;min-height:72px;box-shadow:0 1px 0 rgba(255,255,255,.03),0 2px 14px var(--qr-card-shadow);transition:transform .16s ease,box-shadow .18s ease,border-color .18s ease,background .16s ease}
 .fp-card:hover{border-color:var(--qr-card-border-hover);box-shadow:0 1px 0 rgba(255,255,255,.05),0 6px 22px var(--qr-card-hover-shadow);transform:translateY(0)}
+.fp-card.fp-card-add{display:flex;align-items:center;justify-content:center;padding:0;min-height:72px;border-style:dashed;color:var(--qr-text-2);background:color-mix(in srgb,var(--qr-card-bg,var(--qr-bg-3,#fff)) 82%, var(--qr-accent) 18%)}
+.fp-card.fp-card-add:hover{color:var(--qr-accent);background:color-mix(in srgb,var(--qr-card-bg,var(--qr-bg-3,#fff)) 72%, var(--qr-accent) 28%)}
+.fp-card.fp-card-add .fp-ico{width:22px;height:22px}
+.fp-card.is-pointer-dragging{opacity:1;filter:none}
 .fp-card-title{font-size:13px;font-weight:700;line-height:1.35;word-break:break-word;padding-right:54px;color:inherit}
 .fp-card-icons{position:absolute;right:8px;top:8px;display:flex;gap:6px}
 .fp-mini{font-size:11px;padding:2px 6px;border-radius:99px;background:var(--qr-tag-bg);border:1px solid var(--qr-tag-border);color:var(--qr-tag-text);white-space:nowrap}
@@ -716,37 +782,68 @@
 .fp-bottom.collapsed{height:auto!important}
 .fp-bottom.collapsed .fp-preview{display:none}
 .fp-bottom-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;font-size:12px;color:var(--qr-text-2)}
+.fp-bottom-head [data-clear-preview]{min-height:28px;padding:4px 10px;font-size:12px}
 .fp-preview{overflow:auto;padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px}
-.fp-token{font-size:13px;border-radius:999px;padding:5px 12px;border:1px solid transparent;display:inline-flex;align-items:center;gap:4px;cursor:grab;user-select:none;transition:transform .15s ease,opacity .15s ease}
+.fp-token{position:relative;font-size:13px;border-radius:999px;padding:5px 32px 5px 12px;border:1px solid transparent;display:inline-flex;align-items:center;cursor:grab;user-select:none;transition:transform .15s ease,opacity .15s ease}
 .fp-token:active{cursor:grabbing}
-.fp-token .fp-token-del{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:rgba(0,0,0,.12);color:inherit;font-size:10px;line-height:1;cursor:pointer;opacity:.5;transition:opacity .15s ease,background .15s ease}
-.fp-token .fp-token-del:hover{opacity:1;background:rgba(200,50,50,.25)}
-.fp-token.dragging{opacity:.4;transform:scale(.95)}
-.fp-token.drag-over{transform:scale(1.05);box-shadow:0 0 0 2px rgba(100,150,255,.4)}
+.fp-token .fp-token-label{display:inline-block;line-height:1.2}
+.fp-token .fp-token-del{position:absolute;right:0;top:0;bottom:0;width:28px;display:inline-flex;align-items:center;justify-content:center;padding:0;margin:0;background:transparent;border-left:1px solid var(--qr-border-2);border-top-right-radius:999px;border-bottom-right-radius:999px;color:inherit;font-size:13px;font-weight:700;line-height:1;cursor:pointer;opacity:.72;transition:opacity .15s ease,color .15s ease,background .15s ease}
+.fp-token .fp-token-del:hover{opacity:1;color:#d14c4c;background:rgba(209,76,76,.10)}
+.fp-token.fp-token-dragging{opacity:1!important;transform:none;filter:none}
+.fp-token.drag-over{transform:none;box-shadow:none}
+.fp-token.drop-before{box-shadow:inset 2px 0 0 var(--qr-accent)}
+.fp-token.drop-after{box-shadow:inset -2px 0 0 var(--qr-accent)}
+.fp-token-insert-indicator{width:2px;min-height:22px;align-self:stretch;border-radius:2px;background:var(--qr-accent);opacity:.9;pointer-events:none}
+.fp-preview.is-dragging-preview{cursor:grabbing;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent}
+.fp-drag-active,.fp-drag-active *{user-select:none!important;-webkit-user-select:none!important}
+.fp-drag-ghost{position:fixed;z-index:2147483690;pointer-events:none;opacity:.96;transform:translate3d(0,0,0);filter:drop-shadow(0 6px 14px rgba(0,0,0,.22))}
+.fp-drag-ghost.fp-token{opacity:1}
 .fp-token.item{background:var(--qr-token-item-bg);border-color:var(--qr-token-item-border);color:var(--qr-token-item-text)}
 .fp-token.then{background:var(--qr-token-then-bg);border-color:var(--qr-token-then-border);color:var(--qr-token-then-text)}
 .fp-token.simultaneous{background:var(--qr-token-simul-bg);border-color:var(--qr-token-simul-border);color:var(--qr-token-simul-text)}
+.fp-token.conn-orange{background:var(--qr-conn-orange-bg);border-color:var(--qr-conn-orange-border);color:var(--qr-conn-orange-text)}
+.fp-token.conn-purple{background:var(--qr-conn-purple-bg);border-color:var(--qr-conn-purple-border);color:var(--qr-conn-purple-text)}
+.fp-token.conn-green{background:var(--qr-conn-green-bg);border-color:var(--qr-conn-green-border);color:var(--qr-conn-green-text)}
+.fp-token.conn-blue{background:var(--qr-conn-blue-bg);border-color:var(--qr-conn-blue-border);color:var(--qr-conn-blue-text)}
+.fp-token.conn-red{background:var(--qr-conn-red-bg);border-color:var(--qr-conn-red-border);color:var(--qr-conn-red-text)}
+.fp-token.conn-cyan{background:var(--qr-conn-teal-bg);border-color:var(--qr-conn-teal-border);color:var(--qr-conn-teal-text)}
 .fp-token.raw{background:var(--qr-token-raw-bg);border-color:var(--qr-token-raw-border);color:var(--qr-token-raw-text)}
 .fp-split-v{width:5px;cursor:col-resize;background:linear-gradient(180deg,transparent,rgba(24,24,27,.18),transparent)}
 .fp-split-h{height:5px;cursor:row-resize;background:linear-gradient(90deg,transparent,rgba(24,24,27,.18),transparent)}
-.fp-menu{position:fixed;z-index:2147483600;min-width:148px;padding:6px;background:var(--qr-menu-bg);border:1px solid var(--qr-menu-border);border-radius:10px;box-shadow:0 14px 30px rgba(0,0,0,.18);animation:fp-menu-pop .15s ease}
+.fp-menu{position:fixed;z-index:2147483600;min-width:148px;padding:6px;background:var(--qr-menu-bg,var(--qr-bg-3,#fff));border:1px solid var(--qr-menu-border,var(--qr-border-1,rgba(120,120,130,.3)));border-radius:10px;box-shadow:0 14px 30px rgba(0,0,0,.18);animation:fp-menu-pop .15s ease}
 .fp-menu-btn{display:block;width:100%;text-align:left;padding:8px;border-radius:7px;background:transparent;border:none;color:var(--qr-text-1);cursor:pointer;font-size:12px}
 .fp-menu-btn:hover{background:var(--qr-menu-hover)}
 #${TOAST_CONTAINER_ID}{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:2147483700;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;max-width:calc(100vw - 16px)}
-.fp-toast{pointer-events:auto;max-width:430px;padding:8px 12px;border-radius:12px;background:var(--qr-toast-bg);border:1px solid var(--qr-toast-border);color:var(--qr-toast-text);font-size:12px;box-shadow:0 8px 20px rgba(0,0,0,.30);animation:fp-toast-in .22s ease}
+.fp-toast{pointer-events:auto;max-width:430px;padding:8px 12px;border-radius:12px;background:var(--qr-toast-bg,rgba(24,24,27,.92));border:1px solid var(--qr-toast-border,rgba(255,255,255,.16));color:var(--qr-toast-text,#faf8f4);font-size:12px;box-shadow:0 8px 20px rgba(0,0,0,.30);animation:fp-toast-in .22s ease}
 .fp-modal{position:absolute;inset:0;background:var(--qr-modal-overlay);display:flex;align-items:center;justify-content:center;padding:20px;animation:fp-modal-fadein .2s ease}
-.fp-modal-card{width:min(760px,95%);max-height:88vh;overflow:hidden;display:flex;flex-direction:column;border:1px solid var(--qr-menu-border);border-radius:14px;background:var(--qr-modal-bg);padding:14px;color:var(--qr-text-1);animation:fp-modal-card-in .25s ease}
+.fp-modal-card{width:min(760px,95%);max-height:88vh;overflow:hidden;display:flex;flex-direction:column;border:1px solid var(--qr-menu-border,var(--qr-border-1,rgba(120,120,130,.3)));border-radius:14px;background:var(--qr-modal-bg,var(--qr-bg-3,#fff));padding:14px;color:var(--qr-text-1,#1f2023);animation:fp-modal-card-in .25s ease}
+.fp-settings-card{--fp-settings-min-h:460px;--fp-settings-max-h:760px;min-height:var(--fp-settings-min-h);max-height:min(88vh,var(--fp-settings-max-h));height:clamp(var(--fp-settings-min-h),74vh,var(--fp-settings-max-h))}
 .fp-modal-title{font-weight:800;font-size:15px;margin-bottom:10px}
 .fp-settings-shell{display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px;flex:1;min-height:0;overflow:hidden}
-.fp-settings-nav{display:flex;flex-direction:column;gap:6px;padding-right:8px;border-right:1px solid var(--qr-card-border)}
-.fp-settings-tab{padding:9px 10px;border:1px solid var(--qr-tab-border);border-radius:12px;background:var(--qr-tab-bg);font-size:12px;font-weight:700;cursor:pointer;text-align:left;color:var(--qr-tree-text);box-shadow:var(--qr-control-inset-shadow);transition:border-color .16s ease,background .16s ease,box-shadow .16s ease}
-.fp-settings-tab.active{background:var(--qr-tab-active-bg);color:var(--qr-tab-active-text);border-color:var(--qr-tab-active-bg)}
-.fp-settings-body{min-width:0;overflow-y:auto;padding-right:4px}
+.fp-settings-nav{display:flex;flex-direction:column;gap:4px;padding:2px 10px 2px 0;border-right:1px solid var(--qr-card-border)}
+.fp-settings-nav-group{display:flex;flex-direction:column;gap:4px}
+.fp-settings-nav-title{font-size:11px;font-weight:800;letter-spacing:.35px;color:var(--qr-text-2);padding:6px 8px 2px}
+.fp-settings-tab{position:relative;display:flex;align-items:center;gap:8px;padding:8px 10px;border:none;border-radius:9px;background:transparent;font-size:12px;font-weight:700;cursor:pointer;text-align:left;color:var(--qr-tree-text,var(--qr-text-1,#1f2023));box-shadow:none;transition:background .16s ease,color .16s ease}
+.fp-settings-tab:hover{background:var(--qr-bg-hover)}
+.fp-settings-tab.active{background:color-mix(in srgb,var(--qr-bg-hover) 80%, var(--qr-accent) 20%);color:var(--qr-text-1);box-shadow:inset 2px 0 0 var(--qr-accent)}
+.fp-settings-tab .fp-ico,.fp-settings-tab .fp-tab-ico{width:14px;height:14px;flex:none;opacity:.9}
+.fp-settings-body{min-width:0;min-height:0;overflow-y:auto;padding-right:4px;padding-bottom:2px;scrollbar-gutter:stable}
 .fp-tab{display:none}
 .fp-tab.active{display:block}
 .fp-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
 .fp-row > label{width:98px;font-size:12px;color:var(--qr-row-label)}
-.fp-row > input,.fp-row > textarea,.fp-row > select{flex:1;padding:8px;border-radius:var(--qr-control-radius);border:1px solid var(--qr-btn-border);background:var(--qr-bg-input);color:var(--qr-text-1)}
+.fp-row > input,.fp-row > textarea,.fp-row > select{flex:1;padding:8px;border-radius:var(--qr-control-radius);border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023)}
+.fp-row.fp-row-block{align-items:flex-start}
+.fp-row.fp-row-block > label{padding-top:8px}
+.fp-ph-field{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0}
+.fp-ph-note{font-size:12px;color:var(--qr-text-2)}
+.fp-ph-chip-list{display:flex;flex-wrap:wrap;gap:6px}
+.fp-ph-chip{padding:6px 10px;min-height:30px;border-radius:999px;border:1px solid var(--qr-btn-border);background:var(--qr-btn-bg);color:var(--qr-text-1);font-size:12px;line-height:1;cursor:pointer}
+.fp-ph-chip:hover{background:var(--qr-btn-hover-bg);border-color:var(--qr-btn-hover-border)}
+.fp-ph-chip:focus-visible{outline:none;box-shadow:var(--qr-control-focus-shadow)}
+.fp-ph-chip b{font-weight:700}
+.fp-quick-custom-btn{min-width:74px}
+.fp-row.fp-save-toggle{align-items:center}
 .fp-color-picker{position:relative;display:inline-flex;align-items:center}
 .fp-color-trigger{width:28px;height:28px;border-radius:50%;border:1px solid var(--qr-btn-border);background:var(--qr-bg-3);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:var(--qr-control-inset-shadow),var(--qr-control-rest-shadow);padding:0;transition:border-color .15s ease,box-shadow .15s ease,transform .1s ease}
 .fp-color-trigger:hover{border-color:var(--qr-btn-hover-border);box-shadow:var(--qr-control-inset-shadow),var(--qr-control-hover-shadow)}
@@ -1325,6 +1422,7 @@
   .fp-top{grid-template-columns:1fr;gap:8px}
   .fp-left,.fp-right{justify-content:center}
   .fp-grid{grid-template-columns:1fr}
+  .fp-settings-card{--fp-settings-min-h:360px;height:min(82vh,var(--fp-settings-max-h))}
   .fp-settings-shell{grid-template-columns:1fr}
   .fp-settings-nav{border-right:none;border-bottom:1px solid rgba(24,24,27,.12);padding-right:0;padding-bottom:8px;flex-direction:row;overflow:auto}
 }
@@ -1432,9 +1530,18 @@
       upload: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 10.8V3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="m5.2 6.2 2.8-2.8 2.8 2.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 12.5h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
       download: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3.5v7.3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="m10.8 7.8-2.8 2.8-2.8-2.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 12.5h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
       settings: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m6.7 2 .4 1.4a4.8 4.8 0 0 1 1.8 0L9.3 2l1.6.5-.1 1.5c.5.3 1 .7 1.3 1.3l1.5-.1.5 1.6-1.4.4a4.8 4.8 0 0 1 0 1.8l1.4.4-.5 1.6-1.5-.1c-.3.5-.7 1-1.3 1.3l.1 1.5-1.6.5-.4-1.4a4.8 4.8 0 0 1-1.8 0l-.4 1.4-1.6-.5.1-1.5a4.2 4.2 0 0 1-1.3-1.3l-1.5.1-.5-1.6 1.4-.4a4.8 4.8 0 0 1 0-1.8l-1.4-.4.5-1.6 1.5.1c.3-.5.7-1 1.3-1.3l-.1-1.5L6.7 2Z" stroke="currentColor" stroke-width="1.1"/><circle cx="8" cy="8" r="1.8" stroke="currentColor" stroke-width="1.2"/></svg>',
+      custom: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2.6v2.2M8 11.2v2.2M2.6 8h2.2M11.2 8h2.2M3.8 3.8l1.6 1.6M10.6 10.6l1.6 1.6M12.2 3.8l-1.6 1.6M5.4 10.6l-1.6 1.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="8" r="2.3" stroke="currentColor" stroke-width="1.3"/></svg>',
+      check: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.4 8.2 2.9 2.9 6.3-6.3" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
       close: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m4 4 8 8M12 4 4 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
       'chevron-up': '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 10.5 8 6.5l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
       'chevron-down': '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 5.5 8 9.5l4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      'expand-all': '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.8 5.3 8 9.2l4.2-3.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.8 2.8 8 6.7l4.2-3.9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      'collapse-all': '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.8 10.7 8 6.8l4.2 3.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.8 13.2 8 9.3l4.2 3.9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      braces: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6.1 2.7c-1.6 0-2.2.8-2.2 2.2v1.1c0 .8-.3 1.2-.9 1.5.6.3.9.7.9 1.5v1.1c0 1.4.6 2.2 2.2 2.2M9.9 2.7c1.6 0 2.2.8 2.2 2.2v1.1c0 .8.3 1.2.9 1.5-.6.3-.9.7-.9 1.5v1.1c0 1.4-.6 2.2-2.2 2.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+      link: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6.1 9.9 4.8 11.2a2.1 2.1 0 0 1-3-3L3.1 6.9a2.1 2.1 0 0 1 3 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="m9.9 6.1 1.3-1.3a2.1 2.1 0 0 1 3 3l-1.3 1.3a2.1 2.1 0 0 1-3 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M6.1 9.9h3.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+      wand: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m5 11 6.4-6.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="m10.6 3.3.7-.7M12.7 5.4l.7-.7M12.1 2.7h1.2M13.3 4.9h1.2M2.7 12.1h1.2M3.9 10.9h1.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+      palette: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2.2a5.8 5.8 0 1 0 0 11.6h1.2a1.6 1.6 0 0 0 0-3.2H8.8a1 1 0 0 1 0-2h1.7a3.5 3.5 0 0 0 0-7H8Z" stroke="currentColor" stroke-width="1.4"/><circle cx="4.8" cy="7" r=".8" fill="currentColor"/><circle cx="6.5" cy="5.2" r=".8" fill="currentColor"/><circle cx="9.1" cy="5.1" r=".8" fill="currentColor"/></svg>',
+      sliders: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.2h6M11.5 4.2H13M3 8h2.5M7 8H13M3 11.8h7M11.5 11.8H13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="10.2" cy="4.2" r="1.1" stroke="currentColor" stroke-width="1.3"/><circle cx="5.8" cy="8" r="1.1" stroke="currentColor" stroke-width="1.3"/><circle cx="10.2" cy="11.8" r="1.1" stroke="currentColor" stroke-width="1.3"/></svg>',
       'more-v': '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3.5" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="12.5" r="1.3" fill="currentColor"/></svg>',
     };
     return map[name] || '';
@@ -1448,16 +1555,95 @@
     return `<button class="${cls}" ${dataKey ? `data-${dataKey}` : ''} title="${o.title || o.label || ''}">${iconSvg(o.icon || '')}${label}</button>`;
   }
 
+  function getInputBox(): HTMLTextAreaElement | null {
+    return pD.querySelector('#send_textarea') as HTMLTextAreaElement | null;
+  }
+
+  function previewTokensToInputText(tokens: Array<{ text?: string; label: string }>): string {
+    return tokens.map((t) => String((t && t.text !== undefined) ? t.text : (t?.label || ''))).join('');
+  }
+
+  function buildPreviewTokensFromInputText(rawInput: string): Array<{ id: string; type: string; label: string; text: string }> {
+    const raw = String(rawInput || '');
+    if (!raw) return [];
+    const parts = raw.match(/<[^>]*>|[^<]+/g) || [raw];
+    const connectors = state.pack?.settings?.connectors || [];
+    return parts
+      .map((part) => {
+        const text = String(part || '');
+        if (!text) return null;
+        const conn = connectors.find((c) => c.token === text);
+        if (conn) {
+          return { id: uid('tok'), type: `conn-id:${conn.id}`, label: text, text };
+        }
+        return { id: uid('tok'), type: 'raw', label: text, text };
+      })
+      .filter((x): x is { id: string; type: string; label: string; text: string } => Boolean(x));
+  }
+
+  function syncInputFromPreviewTokens(): void {
+    if (!state.pack) return;
+    const ta = getInputBox();
+    if (!ta) return;
+    const tokens = state.pack.uiState.preview.tokens || [];
+    const next = previewTokensToInputText(tokens);
+    if (String(ta.value || '') === next) return;
+    state.suspendInputSync = true;
+    ta.value = next;
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    state.suspendInputSync = false;
+  }
+
+  function ensurePreviewSyncWithInput(): void {
+    if (!state.pack) return;
+    const ta = getInputBox();
+    if (!ta) return;
+    const tokens = state.pack.uiState.preview.tokens || [];
+    const tokensText = previewTokensToInputText(tokens);
+    const inputText = String(ta.value || '');
+    if (tokensText === inputText) return;
+    state.pack.uiState.preview.tokens = buildPreviewTokensFromInputText(inputText);
+    persistPack();
+  }
+
+  function detachInputSyncListener(): void {
+    if (state.inputSyncTarget && state.inputSyncHandler) {
+      state.inputSyncTarget.removeEventListener('input', state.inputSyncHandler);
+    }
+    state.inputSyncTarget = null;
+    state.inputSyncHandler = null;
+  }
+
+  function attachInputSyncListener(): void {
+    const ta = getInputBox();
+    if (!ta) return;
+    if (state.inputSyncTarget === ta && state.inputSyncHandler) return;
+    detachInputSyncListener();
+    state.inputSyncTarget = ta;
+    state.inputSyncHandler = () => {
+      if (state.suspendInputSync || !state.pack) return;
+      const inputText = String(ta.value || '');
+      const tokensText = previewTokensToInputText(state.pack.uiState.preview.tokens || []);
+      if (inputText === tokensText) return;
+      state.pack.uiState.preview.tokens = buildPreviewTokensFromInputText(inputText);
+      persistPack();
+      refreshPreviewPanel();
+    };
+    ta.addEventListener('input', state.inputSyncHandler);
+  }
+
   function appendToInput(content: string): void {
-    const ta = pD.querySelector('#send_textarea') as HTMLTextAreaElement | null;
+    const ta = getInputBox();
     if (!ta) {
       toast('未找到输入框');
       return;
     }
     const raw = String(ta.value || '');
     const next = raw + content;
+    state.suspendInputSync = true;
     ta.value = next;
     ta.dispatchEvent(new Event('input', { bubbles: true }));
+    state.suspendInputSync = false;
   }
 
   async function injectContent(content: string, itemName: string): Promise<boolean> {
@@ -1490,10 +1676,10 @@
     return false;
   }
 
-  function pushPreviewToken(type: string, label: string): void {
+  function pushPreviewToken(type: string, label: string, text?: string): void {
     if (!state.pack) return;
     const arr = state.pack.uiState.preview.tokens || [];
-    arr.push({ id: uid('tok'), type, label: String(label || '') });
+    arr.push({ id: uid('tok'), type, label: String(label || ''), text: String(text !== undefined ? text : (label || '')) });
     if (arr.length > 120) arr.splice(0, arr.length - 120);
     state.pack.uiState.preview.tokens = arr;
     persistPack();
@@ -1507,27 +1693,58 @@
     previewEls.forEach((el) => renderPreview(el as HTMLElement));
   }
 
+  function clearPreviewTokens(): void {
+    if (!state.pack) return;
+    const tokens = state.pack.uiState.preview.tokens || [];
+    if (!tokens.length) return;
+    state.pack.uiState.preview.tokens = [];
+    syncInputFromPreviewTokens();
+    persistPack();
+    refreshPreviewPanel();
+    toast('预览令牌流已清空');
+  }
+
   async function runItem(item: Item): Promise<void> {
     const parsed = resolvePlaceholders(item.content || '');
     if (item.mode === 'inject') {
       const ok = await injectContent(parsed, item.name);
       if (ok) {
-        pushPreviewToken('item', item.name);
         toast(`已注入: ${item.name}`);
       }
       return;
     }
 
     appendToInput(`<${parsed}>`);
-    pushPreviewToken('item', item.name);
+    pushPreviewToken('item', item.name, `<${parsed}>`);
     toast(`已追加: ${item.name}`);
   }
 
-  function addConnector(connector: ConnectorButton): void {
+  function addConnector(connector: ConnectorButton, opts?: { silent?: boolean }): void {
     if (!state.pack) return;
     appendToInput(connector.token);
-    pushPreviewToken(connector.label, connector.token);
-    toast(`已插入“${connector.label}”`);
+    pushPreviewToken(`conn-id:${connector.id}`, connector.token, connector.token);
+    if (!opts?.silent) toast(`已插入“${connector.label}”`);
+  }
+
+  function getActivePrefixConnector(): ConnectorButton | null {
+    if (!state.pack) return null;
+    const connectors = state.pack.settings.connectors || [];
+    if (!connectors.length) return null;
+    const selectedId = state.pack.settings.defaults.connectorPrefixId;
+    const selected = connectors.find((c) => c.id === selectedId);
+    if (selected) return selected;
+    state.pack.settings.defaults.connectorPrefixId = connectors[0].id;
+    persistPack();
+    return connectors[0];
+  }
+
+  async function runItemDirect(item: Item): Promise<void> {
+    if (!state.pack) return;
+    if (item.mode === 'append' && state.pack.settings.defaults.connectorPrefixMode) {
+      const activeConn = getActivePrefixConnector();
+      if (activeConn) addConnector(activeConn, { silent: true });
+    }
+    await runItem(item);
   }
 
   function closeContextMenu() {
@@ -1600,6 +1817,128 @@
     persistPack();
   }
 
+  let suppressClicksUntil = 0;
+  function isClickSuppressed() {
+    return Date.now() < suppressClicksUntil;
+  }
+  function suppressNextClick(ms = 220) {
+    suppressClicksUntil = Date.now() + ms;
+  }
+
+  function createDragGhost(sourceEl: HTMLElement): HTMLElement {
+    const rect = sourceEl.getBoundingClientRect();
+    const ghost = sourceEl.cloneNode(true) as HTMLElement;
+    ghost.classList.remove('dragging', 'fp-token-dragging', 'is-pointer-dragging');
+    ghost.classList.add('fp-drag-ghost');
+    ghost.style.width = `${Math.max(40, Math.round(rect.width))}px`;
+    ghost.style.height = `${Math.max(20, Math.round(rect.height))}px`;
+    (pD.body || pD.documentElement).appendChild(ghost);
+    return ghost;
+  }
+
+  function canDropCategoryTo(dragId: string, targetId: string): boolean {
+    if (!dragId || !targetId || dragId === targetId) return false;
+    const drag = getCategoryById(dragId);
+    let p = getCategoryById(targetId);
+    if (!drag || !p) return false;
+    while (p) {
+      if (p.id === drag.id) return false;
+      p = p.parentId ? getCategoryById(p.parentId) : null;
+    }
+    return true;
+  }
+
+  function attachPointerCategoryDropDrag(el: HTMLElement, payload: DragData): void {
+    let startX = 0;
+    let startY = 0;
+    let dragging = false;
+    let ghost: HTMLElement | null = null;
+    let dropNode: HTMLElement | null = null;
+    let dropCatId: string | null = null;
+
+    const clearDropNode = () => {
+      if (dropNode) dropNode.classList.remove('drop-target');
+      dropNode = null;
+      dropCatId = null;
+    };
+
+    const cleanup = () => {
+      if (ghost) ghost.remove();
+      ghost = null;
+      el.classList.remove('is-pointer-dragging');
+      (pD.body || pD.documentElement).classList.remove('fp-drag-active');
+      clearDropNode();
+      pW.removeEventListener('pointermove', onMove as EventListener);
+      pW.removeEventListener('pointerup', onUp as EventListener);
+      pW.removeEventListener('pointercancel', onUp as EventListener);
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (!dragging && Math.hypot(dx, dy) < 6) return;
+      if (!dragging) {
+        dragging = true;
+        suppressNextClick(260);
+        (pD.body || pD.documentElement).classList.add('fp-drag-active');
+        el.classList.add('is-pointer-dragging');
+        ghost = createDragGhost(el);
+      }
+      if (ghost) {
+        ghost.style.left = `${Math.round(ev.clientX + 12)}px`;
+        ghost.style.top = `${Math.round(ev.clientY + 12)}px`;
+      }
+      clearDropNode();
+      const hit = pD.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+      const node = hit?.closest('.fp-tree-node[data-cat-id]') as HTMLElement | null;
+      if (node) {
+        const catId = node.dataset.catId || '';
+        const valid = payload.type === 'item'
+          ? Boolean(getCategoryById(catId))
+          : canDropCategoryTo(payload.id, catId);
+        if (valid) {
+          node.classList.add('drop-target');
+          dropNode = node;
+          dropCatId = catId;
+        }
+      }
+      ev.preventDefault();
+    };
+
+    const onUp = (_ev: PointerEvent) => {
+      const shouldApply = dragging && dropCatId;
+      const finalCatId = dropCatId;
+      cleanup();
+      if (!shouldApply || !finalCatId) return;
+      if (payload.type === 'category') {
+        moveCategory(payload.id, finalCatId);
+        renderWorkbench();
+      } else {
+        moveItemToCategory(payload.id, finalCatId);
+        renderWorkbench();
+        toast('条目已移动到分类');
+      }
+    };
+
+    el.addEventListener('pointerdown', (ev: PointerEvent) => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      if (isClickSuppressed()) {
+        ev.preventDefault();
+        return;
+      }
+      startX = ev.clientX;
+      startY = ev.clientY;
+      dragging = false;
+      ghost = null;
+      dropNode = null;
+      dropCatId = null;
+      pW.addEventListener('pointermove', onMove as EventListener, { passive: false });
+      pW.addEventListener('pointerup', onUp as EventListener, { passive: false });
+      pW.addEventListener('pointercancel', onUp as EventListener, { passive: false });
+    });
+  }
+
   function renderTree(treeEl: HTMLElement, onSelect: () => void): void {
     treeEl.innerHTML = '';
 
@@ -1635,7 +1974,6 @@
       if (!categoryHasMatch(cat.id)) return;
       const node = pD.createElement('div');
       node.className = `fp-tree-node ${state.currentCategoryId === cat.id ? 'active' : ''}`;
-      node.draggable = true;
       node.dataset.catId = cat.id;
       const kids = treeChildren(cat.id);
       const isOpen = expanded[cat.id] !== false;
@@ -1643,6 +1981,11 @@
       node.innerHTML = `${indent}<span>${kids.length ? (isOpen ? '▾' : '▸') : '·'}</span><span>${cat.name}</span>`;
 
       node.onclick = (e) => {
+        if (isClickSuppressed()) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         if (kids.length && (e.offsetX < 28 + depth * 12)) {
           expanded[cat.id] = !isOpen;
           persistPack();
@@ -1653,32 +1996,7 @@
         state.currentCategoryId = cat.id;
         onSelect();
       };
-
-      node.addEventListener('dragstart', (e) => {
-        state.dragData = { type: 'category', id: cat.id };
-        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-      });
-      node.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        node.style.outline = '1px dashed rgba(170,220,200,.8)';
-      });
-      node.addEventListener('dragleave', () => {
-        node.style.outline = '';
-      });
-      node.addEventListener('drop', (e) => {
-        e.preventDefault();
-        node.style.outline = '';
-        if (!state.dragData) return;
-        if (state.dragData.type === 'category') {
-          moveCategory(state.dragData.id, cat.id);
-          renderWorkbench();
-        }
-        if (state.dragData.type === 'item') {
-          moveItemToCategory(state.dragData.id, cat.id);
-          renderWorkbench();
-          toast('条目已移动到分类');
-        }
-      });
+      attachPointerCategoryDropDrag(node, { type: 'category', id: cat.id });
 
       treeEl.appendChild(node);
       if (kids.length && isOpen) {
@@ -1746,6 +2064,58 @@
     container.className = 'fp-modal';
     container.appendChild(contentFactory(() => container!.remove()));
     overlay.appendChild(container);
+  }
+
+  function insertTextAtCursor(input: HTMLInputElement | HTMLTextAreaElement, text: string): void {
+    const start = Number(input.selectionStart ?? input.value.length);
+    const end = Number(input.selectionEnd ?? input.value.length);
+    const value = String(input.value || '');
+    input.value = value.slice(0, start) + text + value.slice(end);
+    const nextPos = start + text.length;
+    input.selectionStart = nextPos;
+    input.selectionEnd = nextPos;
+    input.focus();
+  }
+
+  function getOrderedPlaceholderEntries(): Array<{ key: string; value: string }> {
+    const placeholders = state.pack?.settings?.placeholders || {};
+    const baseOrder = ['用户', '角色', '苦主', '黄毛'];
+    const allKeys = Object.keys(placeholders);
+    const ordered = [...baseOrder.filter((k) => allKeys.includes(k)), ...allKeys.filter((k) => !baseOrder.includes(k))];
+    return ordered.map((key) => ({ key, value: String(placeholders[key] || key) }));
+  }
+
+  function buildPlaceholderQuickInsertRow(title = '变量快捷'): string {
+    return `
+      <div class="fp-row fp-row-block">
+        <label>${title}</label>
+        <div class="fp-ph-field">
+          <div class="fp-ph-note">点击占位符即可插入到执行内容当前光标位置</div>
+          <div class="fp-ph-chip-list" data-ph-chips></div>
+        </div>
+      </div>
+    `;
+  }
+
+  function mountPlaceholderQuickInsert(card: HTMLElement, opts: { chipsSelector: string; targetSelector: string }): void {
+    const chipsEl = card.querySelector(opts.chipsSelector) as HTMLElement | null;
+    const target = card.querySelector(opts.targetSelector) as HTMLInputElement | HTMLTextAreaElement | null;
+    if (!chipsEl || !target) return;
+
+    chipsEl.innerHTML = '';
+    const entries = getOrderedPlaceholderEntries();
+    for (const entry of entries) {
+      const btn = pD.createElement('button');
+      btn.type = 'button';
+      btn.className = 'fp-ph-chip';
+      btn.innerHTML = `<b>@${entry.key}</b>`;
+      btn.title = `插入 {@${entry.key}:${entry.value}}`;
+      btn.onclick = (e) => {
+        e.preventDefault();
+        insertTextAtCursor(target, `{@${entry.key}:${entry.value}}`);
+      };
+      chipsEl.appendChild(btn);
+    }
   }
 
   function createCircularColorPicker(opts: {
@@ -1834,7 +2204,7 @@
     if (!state.pack) return;
     showModal((close) => {
       const card = pD.createElement('div');
-      card.className = 'fp-modal-card';
+      card.className = 'fp-modal-card fp-settings-card';
 
       const placeholders = state.pack!.settings.placeholders || {};
       const rows = ['用户', '角色', '苦主', '黄毛'];
@@ -1848,10 +2218,20 @@
         <div class="fp-modal-title">⚙️ 设置中心</div>
         <div class="fp-settings-shell">
           <div class="fp-settings-nav">
-            <button class="fp-settings-tab active" data-tab-btn="placeholders">占位符</button>
-            <button class="fp-settings-tab" data-tab-btn="tokens">执行与连接符</button>
-            <button class="fp-settings-tab" data-tab-btn="themes">主题</button>
-            <button class="fp-settings-tab" data-tab-btn="advanced">高级</button>
+            <div class="fp-settings-nav-group">
+              <div class="fp-settings-nav-title">内容配置</div>
+              <button class="fp-settings-tab active" data-tab-btn="placeholders">${iconSvg('braces')}占位符</button>
+              <button class="fp-settings-tab" data-tab-btn="tokens">${iconSvg('link')}连接符</button>
+              <button class="fp-settings-tab" data-tab-btn="default-mode">${iconSvg('wand')}执行方式</button>
+            </div>
+            <div class="fp-settings-nav-group">
+              <div class="fp-settings-nav-title">外观</div>
+              <button class="fp-settings-tab" data-tab-btn="themes">${iconSvg('palette')}主题</button>
+            </div>
+            <div class="fp-settings-nav-group">
+              <div class="fp-settings-nav-title">系统</div>
+              <button class="fp-settings-tab" data-tab-btn="advanced">${iconSvg('sliders')}高级</button>
+            </div>
           </div>
           <div class="fp-settings-body">
             <div class="fp-tab active" data-tab="placeholders">
@@ -1866,13 +2246,14 @@
               <div style="font-size:12px;color:var(--qr-text-2);margin-bottom:8px">自定义顶栏连接符按钮，点击后插入对应文本到输入框</div>
               <div data-connectors-list></div>
               <button class="fp-btn" data-add-connector style="margin-top:8px">+ 添加连接符</button>
-              <div style="border-top:1px solid var(--qr-border-2);margin-top:12px;padding-top:12px">
-                <div class="fp-row"><label>默认执行方式</label>
-                  <select data-default-mode>
-                    <option value="append" ${state.pack!.settings.defaults.mode === 'append' ? 'selected' : ''}>追加到输入框</option>
-                    <option value="inject" ${state.pack!.settings.defaults.mode === 'inject' ? 'selected' : ''}>注入上下文</option>
-                  </select>
-                </div>
+            </div>
+            <div class="fp-tab" data-tab="default-mode">
+              <div style="font-size:12px;color:var(--qr-text-2);margin-bottom:8px">设置点击条目后的默认执行方式</div>
+              <div class="fp-row"><label>默认执行方式</label>
+                <select data-default-mode>
+                  <option value="append" ${state.pack!.settings.defaults.mode === 'append' ? 'selected' : ''}>追加到输入框</option>
+                  <option value="inject" ${state.pack!.settings.defaults.mode === 'inject' ? 'selected' : ''}>注入上下文</option>
+                </select>
               </div>
             </div>
             <div class="fp-tab" data-tab="themes">
@@ -1919,7 +2300,7 @@
           const row = pD.createElement('div');
           row.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:6px';
           row.innerHTML = `
-            <input data-conn-label="${idx}" value="${conn.label}" placeholder="名称" style="width:80px;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px" />
+            <input data-conn-label="${idx}" value="${conn.label}" placeholder="名称" style="width:80px;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px;text-align:center" />
             <input data-conn-token="${idx}" value="${conn.token}" placeholder="插入内容" style="flex:1;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px" />
             <div data-conn-color-picker="${idx}" style="display:flex;align-items:center"></div>
             <button class="fp-btn icon-only" data-del-conn="${idx}" title="删除" style="padding:4px 8px;font-size:14px;color:#c44">✕</button>
@@ -2050,6 +2431,11 @@
           }
         });
         state.pack!.settings.connectors = updatedConnectors;
+        if (!updatedConnectors.length) {
+          state.pack!.settings.defaults.connectorPrefixId = null;
+        } else if (!updatedConnectors.find((c) => c.id === state.pack!.settings.defaults.connectorPrefixId)) {
+          state.pack!.settings.defaults.connectorPrefixId = updatedConnectors[0].id;
+        }
         // 同步到 tokens（向后兼容）
         const thenConn = updatedConnectors.find(c => c.label === '然后');
         const simulConn = updatedConnectors.find(c => c.label === '同时');
@@ -2087,13 +2473,19 @@
     });
   }
 
-  function openEditItemModal(item: Item | null): void {
+  function openEditItemModal(item: Item | null, presetCategoryId?: string | null): void {
     if (!state.pack) return;
     showModal((close) => {
       const card = pD.createElement('div');
       card.className = 'fp-modal-card';
 
       const cats = state.pack!.categories.sort((a, b) => a.order - b.order);
+      const selectedCategoryId = (
+        (item?.categoryId && getCategoryById(item.categoryId) ? item.categoryId : null) ||
+        (presetCategoryId && getCategoryById(presetCategoryId) ? presetCategoryId : null) ||
+        (state.currentCategoryId && getCategoryById(state.currentCategoryId) ? state.currentCategoryId : null) ||
+        (cats[0]?.id || null)
+      );
 
       card.innerHTML = `
         <div class="fp-modal-title">✏️ 编辑条目</div>
@@ -2106,14 +2498,9 @@
           </select>
         </div>
         <div class="fp-row"><label>所属分类</label>
-          <select data-cat>${cats.map((c) => `<option value="${c.id}" ${((item?.categoryId || state.currentCategoryId) === c.id) ? 'selected' : ''}>${c.name}</option>`).join('')}</select>
+          <select data-cat>${cats.map((c) => `<option value="${c.id}" ${(selectedCategoryId === c.id) ? 'selected' : ''}>${c.name}</option>`).join('')}</select>
         </div>
-        <div class="fp-row"><label>变量快捷</label>
-          <select data-ins>
-            <option value="">选择并插入...</option>
-            ${Object.keys(state.pack!.settings.placeholders).map((k) => `<option value="{@${k}:${state.pack!.settings.placeholders[k]}}">{@${k}}</option>`).join('')}
-          </select>
-        </div>
+        ${buildPlaceholderQuickInsertRow('变量快捷')}
         <div class="fp-actions">
           ${item ? '<button data-del>删除</button>' : ''}
           <button data-close>取消</button>
@@ -2121,13 +2508,7 @@
         </div>
       `;
 
-      const contentEl = card.querySelector('[data-content]') as HTMLTextAreaElement | null;
-      (card.querySelector('[data-ins]') as HTMLSelectElement | null)!.onchange = (e) => {
-        const v = (e.target as HTMLSelectElement).value;
-        if (!v) return;
-        if (contentEl) contentEl.value += v;
-        (e.target as HTMLSelectElement).value = '';
-      };
+      mountPlaceholderQuickInsert(card, { chipsSelector: '[data-ph-chips]', targetSelector: '[data-content]' });
 
       if (item) {
         (card.querySelector('[data-del]') as HTMLElement | null)!.onclick = () => {
@@ -2172,6 +2553,103 @@
         close();
       };
 
+      return card;
+    });
+  }
+
+  function openCustomConnectorActionModal(): void {
+    if (!state.pack) return;
+    showModal((close) => {
+      const card = pD.createElement('div');
+      card.className = 'fp-modal-card';
+
+      const cats = state.pack!.categories.sort((a, b) => a.order - b.order);
+      const selectedCategoryId = (
+        (state.currentCategoryId && getCategoryById(state.currentCategoryId) ? state.currentCategoryId : null) ||
+        (cats[0]?.id || null)
+      );
+      const defaultName = `自定义_${new Date().toLocaleTimeString('zh-CN', { hour12: false }).replace(/:/g, '')}`;
+
+      card.innerHTML = `
+        <div class="fp-modal-title">✨ 自定义连接内容</div>
+        <div class="fp-row"><label>名称</label><input data-name value="${defaultName}" placeholder="如：转场总结" /></div>
+        <div class="fp-row"><label>执行内容</label><textarea data-content placeholder="输入要发送的内容..."></textarea></div>
+        <div class="fp-row"><label>执行方式</label>
+          <select data-mode>
+            <option value="append" ${state.pack!.settings.defaults.mode === 'append' ? 'selected' : ''}>追加到输入框</option>
+            <option value="inject" ${state.pack!.settings.defaults.mode === 'inject' ? 'selected' : ''}>注入到上下文</option>
+          </select>
+        </div>
+        ${buildPlaceholderQuickInsertRow('插入占位符')}
+        <div class="fp-row fp-save-toggle">
+          <label>保存到库</label>
+          <label style="display:flex;align-items:center;gap:8px;width:auto;font-size:12px;color:var(--qr-text-2)">
+            <input type="checkbox" data-save-lib checked />
+            <span>确认后同时创建条目</span>
+          </label>
+        </div>
+        <div class="fp-row" data-save-cat-wrap><label>保存分类</label>
+          <select data-save-cat>${cats.map((c) => `<option value="${c.id}" ${(selectedCategoryId === c.id) ? 'selected' : ''}>${c.name}</option>`).join('')}</select>
+        </div>
+        <div class="fp-actions">
+          <button data-close>取消</button>
+          <button class="primary" data-confirm>确认</button>
+        </div>
+      `;
+
+      mountPlaceholderQuickInsert(card, { chipsSelector: '[data-ph-chips]', targetSelector: '[data-content]' });
+
+      const saveLibEl = card.querySelector('[data-save-lib]') as HTMLInputElement | null;
+      const saveCatWrapEl = card.querySelector('[data-save-cat-wrap]') as HTMLElement | null;
+      const syncSaveCategoryVisibility = () => {
+        if (!saveCatWrapEl || !saveLibEl) return;
+        saveCatWrapEl.style.display = saveLibEl.checked ? '' : 'none';
+      };
+      syncSaveCategoryVisibility();
+      if (saveLibEl) saveLibEl.onchange = syncSaveCategoryVisibility;
+
+      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = close;
+      (card.querySelector('[data-confirm]') as HTMLElement | null)!.onclick = async () => {
+        if (!state.pack) return;
+        const nameInput = (card.querySelector('[data-name]') as HTMLInputElement | null)?.value.trim();
+        const contentInput = (card.querySelector('[data-content]') as HTMLTextAreaElement | null)?.value.trim();
+        const mode = (card.querySelector('[data-mode]') as HTMLSelectElement | null)?.value === 'inject' ? 'inject' : 'append';
+        const shouldSave = !!(card.querySelector('[data-save-lib]') as HTMLInputElement | null)?.checked;
+        const categoryId = (card.querySelector('[data-save-cat]') as HTMLSelectElement | null)?.value || null;
+
+        if (!contentInput) {
+          toast('执行内容不能为空');
+          return;
+        }
+
+        const finalName = nameInput || truncateContent(contentInput, 12) || '自定义条目';
+        const tempItem: Item = {
+          id: uid('temp'),
+          categoryId: null,
+          name: finalName,
+          content: contentInput,
+          mode,
+          favorite: false,
+          order: 0,
+        };
+        await runItemDirect(tempItem);
+
+        if (shouldSave) {
+          state.pack.items.push({
+            id: uid('item'),
+            categoryId,
+            name: finalName,
+            content: contentInput,
+            mode,
+            favorite: false,
+            order: getItemsByCategory(categoryId, false).length,
+          });
+          persistPack();
+          renderWorkbench();
+          toast(`已保存到分类: ${getCategoryById(categoryId || '')?.name || '未分类'}`);
+        }
+        close();
+      };
       return card;
     });
   }
@@ -2769,18 +3247,53 @@
     });
   }
 
+  function resolvePreviewTokenType(token: { type: string; label: string }): string {
+    const t = String(token.type || '').trim();
+    if (!t) return 'raw';
+    if (t === 'item' || t === 'raw') return t;
+
+    const connectors = state.pack?.settings?.connectors || [];
+    const isColor = (v: string) => Object.prototype.hasOwnProperty.call(CONNECTOR_COLOR_HEX, v);
+
+    if (t.startsWith('conn-id:')) {
+      const id = t.slice('conn-id:'.length);
+      const c = connectors.find((x) => x.id === id);
+      return c && isColor(c.color) ? `conn-${c.color}` : 'raw';
+    }
+
+    return 'raw';
+  }
+
   function renderPreview(previewEl: HTMLElement): void {
     previewEl.innerHTML = '';
     const tokens = state.pack?.uiState?.preview?.tokens || [];
+    let insertIndicator: HTMLElement | null = null;
+    const clearDropMarkers = () => {
+      previewEl.querySelectorAll('.fp-token.drop-before,.fp-token.drop-after').forEach((el) => {
+        el.classList.remove('drop-before', 'drop-after');
+      });
+    };
+    const ensureInsertIndicator = () => {
+      if (!insertIndicator) {
+        insertIndicator = pD.createElement('span');
+        insertIndicator.className = 'fp-token-insert-indicator';
+      }
+      return insertIndicator;
+    };
+    const clearInsertIndicator = () => {
+      if (insertIndicator && insertIndicator.parentElement) {
+        insertIndicator.remove();
+      }
+    };
     
     tokens.forEach((t, index) => {
       const chip = pD.createElement('span');
-      chip.className = `fp-token ${t.type || 'raw'}`;
-      chip.draggable = true;
+      chip.className = `fp-token ${resolvePreviewTokenType(t)}`;
       chip.dataset.tokenIndex = String(index);
       
       // 标签文字
       const labelSpan = pD.createElement('span');
+      labelSpan.className = 'fp-token-label';
       labelSpan.textContent = t.label || '';
       chip.appendChild(labelSpan);
       
@@ -2793,102 +3306,87 @@
         e.stopPropagation();
         if (!state.pack) return;
         state.pack.uiState.preview.tokens.splice(index, 1);
+        syncInputFromPreviewTokens();
         persistPack();
         refreshPreviewPanel();
       };
       chip.appendChild(del);
-      
-      // PC 拖拽排序
-      chip.addEventListener('dragstart', (e) => {
-        chip.classList.add('dragging');
-        e.dataTransfer!.effectAllowed = 'move';
-        e.dataTransfer!.setData('text/plain', String(index));
-      });
-      chip.addEventListener('dragend', () => {
-        chip.classList.remove('dragging');
-      });
-      chip.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        chip.classList.add('drag-over');
-      });
-      chip.addEventListener('dragleave', () => {
-        chip.classList.remove('drag-over');
-      });
-      chip.addEventListener('drop', (e) => {
-        e.preventDefault();
-        chip.classList.remove('drag-over');
-        const fromIndex = parseInt(e.dataTransfer!.getData('text/plain'), 10);
-        const toIndex = index;
-        if (isNaN(fromIndex) || fromIndex === toIndex || !state.pack) return;
-        const arr = state.pack.uiState.preview.tokens;
-        const [moved] = arr.splice(fromIndex, 1);
-        arr.splice(toIndex, 0, moved);
-        persistPack();
-        refreshPreviewPanel();
-      });
-      
-      // 手机端长按拖拽 - 使用 touchstart/touchmove/touchend 模拟
-      let touchStartY = 0;
-      let touchStartX = 0;
-      let touchTimer: ReturnType<typeof setTimeout> | null = null;
-      let isDragging = false;
-      let dragClone: HTMLElement | null = null;
-      
-      chip.addEventListener('touchstart', (e) => {
-        const touch = e.touches[0];
-        touchStartX = touch.clientX;
-        touchStartY = touch.clientY;
-        touchTimer = setTimeout(() => {
-          isDragging = true;
-          chip.classList.add('dragging');
-          // 创建拖拽幽灵
-          dragClone = chip.cloneNode(true) as HTMLElement;
-          dragClone.style.cssText = 'position:fixed;z-index:999999;pointer-events:none;opacity:.8;transform:scale(1.05)';
-          dragClone.style.left = `${touch.clientX - 30}px`;
-          dragClone.style.top = `${touch.clientY - 15}px`;
-          pD.body.appendChild(dragClone);
-        }, 400);
-      }, { passive: true });
-      
-      chip.addEventListener('touchmove', (e) => {
-        if (!isDragging) {
-          // 如果移动超过阈值，取消长按
-          const touch = e.touches[0];
-          if (Math.abs(touch.clientX - touchStartX) > 10 || Math.abs(touch.clientY - touchStartY) > 10) {
-            if (touchTimer) { clearTimeout(touchTimer); touchTimer = null; }
-          }
+      chip.addEventListener('pointerdown', (e: PointerEvent) => {
+        if (e.button !== 0) return;
+        if ((e.target as HTMLElement | null)?.closest('.fp-token-del')) return;
+        if (isClickSuppressed()) {
+          e.preventDefault();
           return;
         }
-        e.preventDefault();
-        const touch = e.touches[0];
-        if (dragClone) {
-          dragClone.style.left = `${touch.clientX - 30}px`;
-          dragClone.style.top = `${touch.clientY - 15}px`;
-        }
-      });
-      
-      chip.addEventListener('touchend', (e) => {
-        if (touchTimer) { clearTimeout(touchTimer); touchTimer = null; }
-        if (!isDragging) return;
-        isDragging = false;
-        chip.classList.remove('dragging');
-        if (dragClone) { dragClone.remove(); dragClone = null; }
-        
-        // 查找放置目标
-        const touch = e.changedTouches[0];
-        const target = pD.elementFromPoint(touch.clientX, touch.clientY);
-        const targetChip = target?.closest('.fp-token') as HTMLElement | null;
-        if (targetChip && targetChip !== chip && targetChip.dataset.tokenIndex && state.pack) {
-          const fromIdx = index;
-          const toIdx = parseInt(targetChip.dataset.tokenIndex, 10);
-          if (!isNaN(toIdx) && fromIdx !== toIdx) {
-            const arr = state.pack.uiState.preview.tokens;
-            const [moved] = arr.splice(fromIdx, 1);
-            arr.splice(toIdx, 0, moved);
-            persistPack();
-            refreshPreviewPanel();
+        const fromIndex = index;
+        const startX = e.clientX;
+        const startY = e.clientY;
+        let dragging = false;
+        let dropIndex = fromIndex;
+        let ghost: HTMLElement | null = null;
+
+        const onMove = (ev: PointerEvent) => {
+          const dx = ev.clientX - startX;
+          const dy = ev.clientY - startY;
+          if (!dragging && Math.hypot(dx, dy) < 6) return;
+          if (!dragging) {
+            dragging = true;
+            suppressNextClick(260);
+            previewEl.classList.add('is-dragging-preview');
+            chip.classList.add('fp-token-dragging');
+            chip.style.pointerEvents = 'none';
+            const indicator = ensureInsertIndicator();
+            previewEl.insertBefore(indicator, chip.nextSibling);
+            ghost = createDragGhost(chip);
           }
-        }
+
+          if (ghost) {
+            ghost.style.left = `${Math.round(ev.clientX + 12)}px`;
+            ghost.style.top = `${Math.round(ev.clientY + 12)}px`;
+          }
+
+          const indicator = ensureInsertIndicator();
+          const otherChips = Array.from(previewEl.querySelectorAll('.fp-token'))
+            .filter((el) => el !== chip) as HTMLElement[];
+          dropIndex = otherChips.length;
+          for (let i = 0; i < otherChips.length; i++) {
+            const rect = otherChips[i].getBoundingClientRect();
+            if (ev.clientX < rect.left + rect.width / 2) {
+              dropIndex = i;
+              break;
+            }
+          }
+          if (dropIndex >= otherChips.length) previewEl.appendChild(indicator);
+          else previewEl.insertBefore(indicator, otherChips[dropIndex]);
+          ev.preventDefault();
+        };
+
+        const onUp = () => {
+          pW.removeEventListener('pointermove', onMove as EventListener);
+          pW.removeEventListener('pointerup', onUp as EventListener);
+          pW.removeEventListener('pointercancel', onUp as EventListener);
+          if (ghost) ghost.remove();
+          chip.style.pointerEvents = '';
+          chip.classList.remove('fp-token-dragging');
+          previewEl.classList.remove('is-dragging-preview');
+          clearDropMarkers();
+          clearInsertIndicator();
+
+          if (!dragging || !state.pack) return;
+          let toIndex = dropIndex;
+          if (toIndex > fromIndex) toIndex -= 1;
+          if (toIndex === fromIndex) return;
+          const arr = state.pack.uiState.preview.tokens;
+          const [moved] = arr.splice(fromIndex, 1);
+          arr.splice(toIndex, 0, moved);
+          syncInputFromPreviewTokens();
+          persistPack();
+          refreshPreviewPanel();
+        };
+
+        pW.addEventListener('pointermove', onMove as EventListener, { passive: false });
+        pW.addEventListener('pointerup', onUp as EventListener, { passive: false });
+        pW.addEventListener('pointercancel', onUp as EventListener, { passive: false });
       });
       
       previewEl.appendChild(chip);
@@ -2970,55 +3468,19 @@
     if (rect.bottom > vp.height - 6) menu.style.top = `${vp.height - rect.height - 8}px`;
   }
 
-  function showItemSubmenu(item: Item, x: number, y: number): void {
-    closeContextMenu();
-    if (!state.pack) return;
-    const connectors = state.pack.settings.connectors || [];
-    
-    const menu = pD.createElement('div');
-    menu.className = 'fp-menu';
-    menu.style.left = `${x}px`;
-    menu.style.top = `${y}px`;
-    
-    // 直接插入
-    const directBtn = pD.createElement('button');
-    directBtn.className = 'fp-menu-btn';
-    directBtn.textContent = '直接插入';
-    directBtn.onclick = () => {
-      runItem(item);
-      menu.remove();
-      state.contextMenu = null;
-    };
-    menu.appendChild(directBtn);
-    
-    // 带连接符插入
-    for (const conn of connectors) {
-      const btn = pD.createElement('button');
-      btn.className = 'fp-menu-btn';
-      btn.textContent = `${conn.label} + 插入`;
-      btn.onclick = () => {
-        addConnector(conn);
-        runItem(item);
-        menu.remove();
-        state.contextMenu = null;
-      };
-      menu.appendChild(btn);
-    }
-    
-    const menuHost = pD.getElementById(OVERLAY_ID) || pD.body;
-    menuHost.appendChild(menu);
-    state.contextMenu = menu;
-    
-    // 边界修正
-    const rect = menu.getBoundingClientRect();
-    const vp = getViewportSize();
-    if (rect.right > vp.width - 6) menu.style.left = `${vp.width - rect.width - 8}px`;
-    if (rect.bottom > vp.height - 6) menu.style.top = `${vp.height - rect.height - 8}px`;
-  }
-
   function renderMain(mainScroll: HTMLElement): void {
     mainScroll.innerHTML = '';
     const groups = groupedItemsForMain();
+    const onQuickAdd = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      const btn = target?.closest('[data-quick-add-cat]') as HTMLElement | null;
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const catId = btn.getAttribute('data-quick-add-cat');
+      openEditItemModal(null, catId || null);
+    };
+    mainScroll.onclick = onQuickAdd;
 
     if (!groups.length || groups.every((g) => !g.items.length)) {
       const empty = pD.createElement('div');
@@ -3041,7 +3503,6 @@
       for (const item of g.items) {
         const card = pD.createElement('div');
         card.className = 'fp-card';
-        card.draggable = true;
         card.style.cursor = 'pointer';
         const excerpt = truncateContent(item.content, 80);
         const modeLabel = item.mode === 'inject' ? '注入' : '追加';
@@ -3055,13 +3516,14 @@
         `;
 
         card.onclick = (e) => {
+          if (isClickSuppressed()) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
           e.preventDefault();
           e.stopPropagation();
-          if (item.mode === 'inject') {
-            runItem(item);
-          } else {
-            showItemSubmenu(item, e.clientX, e.clientY);
-          }
+          runItemDirect(item);
         };
 
         card.oncontextmenu = (e) => {
@@ -3080,13 +3542,19 @@
           state.longPressTimer = null;
         });
 
-        card.addEventListener('dragstart', (e) => {
-          state.dragData = { type: 'item', id: item.id };
-          if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-        });
+        attachPointerCategoryDropDrag(card, { type: 'item', id: item.id });
 
         grid.appendChild(card);
       }
+
+      const quickAddCard = pD.createElement('button');
+      quickAddCard.type = 'button';
+      quickAddCard.className = 'fp-card fp-card-add';
+      quickAddCard.setAttribute('data-quick-add-cat', g.groupId);
+      quickAddCard.setAttribute('aria-label', '快速新增条目');
+      quickAddCard.title = `在“${g.groupName}”中新增条目`;
+      quickAddCard.innerHTML = iconSvg('add');
+      grid.appendChild(quickAddCard);
 
       mainScroll.appendChild(grid);
     }
@@ -3286,11 +3754,7 @@
     btn.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (item.mode === 'inject') {
-        runItem(item);
-      } else {
-        showItemSubmenu(item, e.clientX, e.clientY);
-      }
+      runItemDirect(item);
     };
     btn.oncontextmenu = (e) => {
       e.preventDefault();
@@ -3361,6 +3825,7 @@
 
     const panel = overlay.querySelector('.fp-panel') as HTMLElement | null;
     if (!panel || !state.pack) return;
+    ensurePreviewSyncWithInput();
     panel.innerHTML = '';
     const activeTheme = (state.pack.settings.ui && state.pack.settings.ui.theme) || 'herdi-light';
     panel.setAttribute('data-theme', activeTheme);
@@ -3406,18 +3871,35 @@
     top.className = 'fp-top';
 
     const connectors = state.pack.settings.connectors || [];
-    const connectorBtnsHtml = connectors.map((c, i) => 
-      renderTopButton({ data: `conn-${i}`, icon: i === 0 ? 'then' : (i === 1 ? 'simul' : 'add'), label: c.label, className: `fp-btn fp-conn-${c.color}` })
-    ).join('');
+    const prefixModeEnabled = !!state.pack.settings.defaults.connectorPrefixMode;
+    const selectedPrefixId = state.pack.settings.defaults.connectorPrefixId || connectors[0]?.id || null;
+    const connectorBtnsHtml = connectors.map((c, i) => {
+      const baseIconName = i === 0 ? 'then' : (i === 1 ? 'simul' : 'add');
+      const checked = prefixModeEnabled && c.id === selectedPrefixId;
+      const iconName = checked ? 'check' : baseIconName;
+      return `<button class="fp-btn fp-conn-${c.color} fp-conn-btn ${checked ? 'is-selected' : ''}" data-conn-${i} title="${c.label}">${iconSvg(iconName)}${c.label}</button>`;
+    }).join('');
+    const connectorModeSwitchHtml = `
+      <button type="button" class="fp-connector-switch ${prefixModeEnabled ? 'is-on' : ''}" data-conn-mode-toggle title="连接模式" aria-pressed="${prefixModeEnabled ? 'true' : 'false'}">
+        <span class="fp-switch-track">
+          <span class="fp-switch-label-off">直</span>
+          <span class="fp-switch-label-on">连</span>
+          <span class="fp-switch-thumb"></span>
+        </span>
+      </button>
+    `;
+    const customConnectorBtnHtml = `<button class="fp-btn fp-quick-custom-btn" data-conn-custom title="自定义连接内容">${iconSvg('custom')}自定义</button>`;
 
     if (compact) {
       top.innerHTML = `
-        <div class="fp-left">
-          ${renderTopButton({ data: 'back', icon: 'back', label: '返回' })}
-          <div class="fp-quick-actions">
-            ${connectorBtnsHtml}
+          <div class="fp-left">
+            ${renderTopButton({ data: 'back', icon: 'back', label: '返回' })}
+            <div class="fp-quick-actions">
+              ${connectorBtnsHtml}
+              ${connectorModeSwitchHtml}
+              ${customConnectorBtnHtml}
+            </div>
           </div>
-        </div>
         <div class="fp-right">
           ${renderTopButton({ data: 'more-menu', icon: 'more-v', iconOnly: true, title: '更多操作' })}
           ${renderTopButton({ data: 'settings', icon: 'settings', iconOnly: true, title: '设置' })}
@@ -3426,13 +3908,14 @@
       `;
     } else {
       top.innerHTML = `
-        <div class="fp-left">
-          ${renderTopButton({ data: 'back', icon: 'back', label: '返回' })}
-          <span class="fp-title">💌 快速回复管理器</span>
-          <div class="fp-quick-actions">
-            ${connectorBtnsHtml}
+          <div class="fp-left">
+            ${renderTopButton({ data: 'back', icon: 'back', label: '返回' })}
+            <div class="fp-quick-actions">
+              ${connectorBtnsHtml}
+              ${connectorModeSwitchHtml}
+              ${customConnectorBtnHtml}
+            </div>
           </div>
-        </div>
         <div class="fp-right">
           ${renderTopButton({ data: 'new-cat', icon: 'folder', label: '新分类' })}
           ${renderTopButton({ data: 'new-item', icon: 'add', label: '新增条目' })}
@@ -3472,7 +3955,7 @@
 
       const compactBottomHead = pD.createElement('div');
       compactBottomHead.className = 'fp-bottom-head';
-      compactBottomHead.innerHTML = '<span>预览令牌流</span><button class="fp-btn icon-only" data-toggle-preview title="收起/展开">' + iconSvg(previewExpanded ? 'chevron-down' : 'chevron-up') + '</button>';
+      compactBottomHead.innerHTML = '<span>预览令牌流</span><div style="display:flex;align-items:center;gap:6px"><button class="fp-btn" data-clear-preview title="清空预览令牌流">清空</button><button class="fp-btn icon-only" data-toggle-preview title="收起/展开">' + iconSvg(previewExpanded ? 'chevron-down' : 'chevron-up') + '</button></div>';
 
       const compactPreview = pD.createElement('div');
       compactPreview.className = 'fp-preview';
@@ -3495,6 +3978,10 @@
           renderWorkbench();
         };
       }
+      const compactClearBtn = compactBottomHead.querySelector('[data-clear-preview]') as HTMLElement | null;
+      if (compactClearBtn) {
+        compactClearBtn.onclick = () => clearPreviewTokens();
+      }
     } else {
       // ===== 原有桌面分栏模式 =====
       const sidebar = pD.createElement('div');
@@ -3503,13 +3990,22 @@
 
       const sideHead = pD.createElement('div');
       sideHead.className = 'fp-side-head';
-      sideHead.innerHTML = '<input class="fp-input" placeholder="筛选分类/条目" />';
+      const expandedMap = state.pack.uiState.sidebar.expanded || {};
+      const allExpanded = state.pack.categories.length > 0 && state.pack.categories.every((c) => expandedMap[c.id] !== false);
+      const treeToggleTitle = allExpanded ? '全部折叠' : '全部展开';
+      const treeToggleIcon = allExpanded ? 'collapse-all' : 'expand-all';
+      sideHead.innerHTML = '<input class="fp-input" placeholder="筛选分类/条目" /><div class="fp-tree-tools"><button class="fp-tree-tool-btn" data-tree-toggle title="' + treeToggleTitle + '">' + iconSvg(treeToggleIcon) + '</button></div>';
 
       const tree = pD.createElement('div');
       tree.className = 'fp-tree';
+      const sideFoot = pD.createElement('div');
+      sideFoot.className = 'fp-sidebar-foot';
+      const ver = String(state.pack.meta?.version || DATA_VERSION);
+      sideFoot.innerHTML = `<span class="name">快速回复管理器</span><span class="ver">· v${ver}</span>`;
 
       sidebar.appendChild(sideHead);
       sidebar.appendChild(tree);
+      sidebar.appendChild(sideFoot);
 
       const splitV = pD.createElement('div');
       splitV.className = 'fp-split-v';
@@ -3534,7 +4030,7 @@
 
       bottomHead = pD.createElement('div');
       bottomHead.className = 'fp-bottom-head';
-      bottomHead.innerHTML = '<span>预览令牌流</span><button class="fp-btn icon-only" data-toggle-preview title="收起/展开">' + iconSvg(previewExpanded ? 'chevron-down' : 'chevron-up') + '</button>';
+      bottomHead.innerHTML = '<span>预览令牌流</span><div style="display:flex;align-items:center;gap:6px"><button class="fp-btn" data-clear-preview title="清空预览令牌流">清空</button><button class="fp-btn icon-only" data-toggle-preview title="收起/展开">' + iconSvg(previewExpanded ? 'chevron-down' : 'chevron-up') + '</button></div>';
 
       const preview = pD.createElement('div');
       preview.className = 'fp-preview';
@@ -3568,6 +4064,18 @@
           renderWorkbench();
         };
       }
+      const treeToggleBtn = sideHead.querySelector('[data-tree-toggle]') as HTMLElement | null;
+      if (treeToggleBtn) {
+        treeToggleBtn.onclick = () => {
+          if (!state.pack) return;
+          const expanded = state.pack.uiState.sidebar.expanded || {};
+          const shouldCollapseAll = state.pack.categories.length > 0 && state.pack.categories.every((c) => expanded[c.id] !== false);
+          for (const c of state.pack.categories) expanded[c.id] = !shouldCollapseAll;
+          state.pack.uiState.sidebar.expanded = expanded;
+          persistPack();
+          renderWorkbench();
+        };
+      }
     }
 
     // === 顶栏事件绑定（compact 和非 compact 都需要）===
@@ -3593,8 +4101,38 @@
     }
     connectors.forEach((conn, i) => {
       const el = top.querySelector(`[data-conn-${i}]`) as HTMLElement | null;
-      if (el) el.onclick = () => addConnector(conn);
+      if (!el) return;
+      el.onclick = () => {
+        if (!state.pack) return;
+        if (!state.pack.settings.defaults.connectorPrefixMode) {
+          addConnector(conn);
+          return;
+        }
+        state.pack.settings.defaults.connectorPrefixId = conn.id;
+        persistPack();
+        renderWorkbench();
+      };
     });
+    const connModeToggle = top.querySelector('[data-conn-mode-toggle]') as HTMLElement | null;
+    if (connModeToggle) {
+      connModeToggle.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!state.pack) return;
+        const next = !state.pack.settings.defaults.connectorPrefixMode;
+        state.pack.settings.defaults.connectorPrefixMode = next;
+        if (next) {
+          const connectorsNow = state.pack.settings.connectors || [];
+          if (connectorsNow.length && !connectorsNow.find((c) => c.id === state.pack!.settings.defaults.connectorPrefixId)) {
+            state.pack.settings.defaults.connectorPrefixId = connectorsNow[0].id;
+          }
+        }
+        persistPack();
+        renderWorkbench();
+      };
+    }
+    const connCustomBtn = top.querySelector('[data-conn-custom]') as HTMLElement | null;
+    if (connCustomBtn) connCustomBtn.onclick = () => openCustomConnectorActionModal();
     const settingsBtn = top.querySelector('[data-settings]') as HTMLElement | null;
     if (settingsBtn) settingsBtn.onclick = openSettingsModal;
     // import/export 按钮只在非 compact 模式下存在
@@ -3699,12 +4237,17 @@
           renderWorkbench();
         };
       }
+      const clearBtn = bottomHead.querySelector('[data-clear-preview]') as HTMLElement | null;
+      if (clearBtn) {
+        clearBtn.onclick = () => clearPreviewTokens();
+      }
     }
   }
 
   function closeWorkbench() {
     closeContextMenu();
     detachHostResize();
+    detachInputSyncListener();
     const overlay = pD.getElementById(OVERLAY_ID);
     if (overlay) overlay.remove();
   }
@@ -3772,6 +4315,7 @@
     applyFitPanelSize();
     persistPack();
     attachHostResize();
+    attachInputSyncListener();
     renderWorkbench();
   }
 
