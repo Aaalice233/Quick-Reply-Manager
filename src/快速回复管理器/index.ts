@@ -746,9 +746,10 @@ body {
 .fp-tree-tool-btn:hover{border-color:var(--qr-btn-hover-border);background:var(--qr-bg-hover);color:var(--qr-text-1)}
 .fp-tree-tool-btn:active{transform:scale(.96)}
 .fp-tree-tool-btn .fp-ico{width:12px;height:12px}
-.fp-input{width:100%;padding:8px 12px;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));border-radius:var(--qr-control-radius);min-height:var(--qr-control-min-h);background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023);box-shadow:none;transition:border-color .16s ease,box-shadow .18s ease,transform .12s ease,background .16s ease}
+.fp-input{width:100%;padding:9px 14px;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));border-radius:var(--qr-control-radius);min-height:var(--qr-control-min-h);background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023);box-shadow:none;transition:border-color .16s ease,box-shadow .18s ease,transform .12s ease,background .16s ease}
 .fp-input::placeholder{color:var(--qr-placeholder)}
-#${OVERLAY_ID} input:not([type="checkbox"]):not([type="radio"]),#${OVERLAY_ID} textarea,#${OVERLAY_ID} select{background:var(--qr-bg-input,var(--qr-bg-3,#fff))!important;color:var(--qr-text-1,#1f2023)!important;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28))!important;border-radius:var(--qr-control-radius)!important;min-height:var(--qr-control-min-h)!important;box-shadow:none!important;outline:none!important;transition:border-color .16s ease,box-shadow .18s ease,transform .12s ease,background .16s ease}
+#${OVERLAY_ID} input:not([type="checkbox"]):not([type="radio"]),#${OVERLAY_ID} textarea,#${OVERLAY_ID} select{background:var(--qr-bg-input,var(--qr-bg-3,#fff))!important;color:var(--qr-text-1,#1f2023)!important;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28))!important;border-radius:var(--qr-control-radius)!important;min-height:var(--qr-control-min-h)!important;box-shadow:none!important;outline:none!important;padding:9px 14px!important;transition:border-color .16s ease,box-shadow .18s ease,transform .12s ease,background .16s ease}
+#${OVERLAY_ID} select{appearance:none!important;-webkit-appearance:none!important;-moz-appearance:none!important;padding-right:38px!important;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4.2 6.2 8 10l3.8-3.8' stroke='%23939aa8' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")!important;background-repeat:no-repeat!important;background-position:right 12px center!important;background-size:12px 12px!important}
 #${OVERLAY_ID} input:not([type="checkbox"]):not([type="radio"])::placeholder,#${OVERLAY_ID} textarea::placeholder{color:var(--qr-placeholder)!important}
 #${OVERLAY_ID} input:not([type="checkbox"]):not([type="radio"]):focus,#${OVERLAY_ID} textarea:focus,#${OVERLAY_ID} select:focus{border-color:var(--qr-accent)!important;background:var(--qr-btn-hover-bg)!important;box-shadow:var(--qr-control-focus-shadow)!important;transform:translateY(var(--qr-control-lift))}
 #${OVERLAY_ID} input:-webkit-autofill,#${OVERLAY_ID} input:-webkit-autofill:hover,#${OVERLAY_ID} input:-webkit-autofill:focus,#${OVERLAY_ID} textarea:-webkit-autofill,#${OVERLAY_ID} select:-webkit-autofill{-webkit-text-fill-color:var(--qr-text-1)!important;box-shadow:0 0 0 1000px var(--qr-bg-input) inset!important;transition:background-color 9999s ease-in-out 0s}
@@ -815,9 +816,12 @@ body {
 .fp-menu-btn:hover{background:var(--qr-menu-hover)}
 #${TOAST_CONTAINER_ID}{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:2147483700;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;max-width:calc(100vw - 16px)}
 .fp-toast{pointer-events:auto;max-width:430px;padding:8px 12px;border-radius:12px;background:var(--qr-toast-bg,rgba(24,24,27,.92));border:1px solid var(--qr-toast-border,rgba(255,255,255,.16));color:var(--qr-toast-text,#faf8f4);font-size:12px;box-shadow:0 8px 20px rgba(0,0,0,.30);animation:fp-toast-in .22s ease}
-.fp-modal{position:absolute;inset:0;background:var(--qr-modal-overlay);display:flex;align-items:center;justify-content:center;padding:20px;animation:fp-modal-fadein .2s ease}
+.fp-modal{position:absolute;inset:0;background:var(--qr-modal-overlay);display:flex;align-items:center;justify-content:center;padding:20px;animation:fp-modal-fadein .2s ease;overflow:auto}
 .fp-modal-card{width:min(760px,95%);max-height:88vh;overflow:hidden;display:flex;flex-direction:column;border:1px solid var(--qr-menu-border,var(--qr-border-1,rgba(120,120,130,.3)));border-radius:14px;background:var(--qr-modal-bg,var(--qr-bg-3,#fff));padding:14px;color:var(--qr-text-1,#1f2023);animation:fp-modal-card-in .25s ease}
 .fp-settings-card{--fp-settings-min-h:460px;--fp-settings-max-h:760px;min-height:var(--fp-settings-min-h);max-height:min(88vh,var(--fp-settings-max-h));height:clamp(var(--fp-settings-min-h),74vh,var(--fp-settings-max-h))}
+.fp-edit-item-card{width:min(560px,92vw);min-height:min(70vh,700px);max-height:min(82vh,760px)}
+.fp-edit-scroll{flex:1;min-height:0;overflow-y:auto;padding-right:4px;scrollbar-gutter:stable}
+.fp-edit-item-card [data-content]{min-height:250px;height:250px}
 .fp-modal-title{font-weight:800;font-size:15px;margin-bottom:10px}
 .fp-settings-shell{display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px;flex:1;min-height:0;overflow:hidden}
 .fp-settings-nav{display:flex;flex-direction:column;gap:4px;padding:2px 10px 2px 0;border-right:1px solid var(--qr-card-border)}
@@ -832,7 +836,8 @@ body {
 .fp-tab.active{display:block}
 .fp-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
 .fp-row > label{width:98px;font-size:12px;color:var(--qr-row-label)}
-.fp-row > input,.fp-row > textarea,.fp-row > select{flex:1;padding:8px;border-radius:var(--qr-control-radius);border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023)}
+.fp-row > input,.fp-row > textarea,.fp-row > select{flex:1;padding:9px 14px;border-radius:var(--qr-control-radius);border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023)}
+.fp-row > select{appearance:none;-webkit-appearance:none;-moz-appearance:none;padding-right:38px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4.2 6.2 8 10l3.8-3.8' stroke='%23939aa8' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:12px 12px}
 .fp-row.fp-row-block{align-items:flex-start}
 .fp-row.fp-row-block > label{padding-top:8px}
 .fp-ph-field{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0}
@@ -844,6 +849,21 @@ body {
 .fp-ph-chip b{font-weight:700}
 .fp-quick-custom-btn{min-width:74px}
 .fp-row.fp-save-toggle{align-items:center}
+.fp-cat-field{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0}
+.fp-cat-picker{position:relative;flex:1;min-width:0}
+.fp-cat-picker-trigger{width:100%;min-height:40px;padding:8px 34px 8px 12px;border:1px solid var(--qr-btn-border);border-radius:12px;background:var(--qr-bg-input);color:var(--qr-text-1);text-align:left;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative}
+.fp-cat-picker-trigger:hover{border-color:var(--qr-btn-hover-border);background:var(--qr-btn-hover-bg)}
+.fp-cat-picker-trigger .fp-ico{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:12px;height:12px;opacity:.72;margin-right:0}
+.fp-cat-picker.open .fp-cat-picker-trigger{border-color:var(--qr-accent);box-shadow:var(--qr-control-focus-shadow)}
+.fp-cat-picker-panel{position:absolute;left:0;right:0;top:calc(100% + 6px);display:none;z-index:90;border:1px solid var(--qr-menu-border);border-radius:12px;background:var(--qr-menu-bg);box-shadow:0 12px 28px rgba(0,0,0,.24);padding:8px}
+.fp-cat-picker.open .fp-cat-picker-panel{display:block}
+.fp-cat-picker.open-up .fp-cat-picker-panel{top:auto;bottom:calc(100% + 6px)}
+.fp-cat-picker-search{width:100%;margin-bottom:8px}
+.fp-cat-picker-list{max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:4px}
+.fp-cat-opt{width:100%;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--qr-text-1);padding:7px 9px;text-align:left;cursor:pointer;font-size:12px;line-height:1.35}
+.fp-cat-opt:hover{background:var(--qr-menu-hover)}
+.fp-cat-opt.active{border-color:var(--qr-accent);background:color-mix(in srgb,var(--qr-menu-hover) 72%, var(--qr-accent) 28%)}
+.fp-cat-empty{padding:8px 10px;color:var(--qr-text-2);font-size:12px}
 .fp-color-picker{position:relative;display:inline-flex;align-items:center}
 .fp-color-trigger{width:28px;height:28px;border-radius:50%;border:1px solid var(--qr-btn-border);background:var(--qr-bg-3);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:var(--qr-control-inset-shadow),var(--qr-control-rest-shadow);padding:0;transition:border-color .15s ease,box-shadow .15s ease,transform .1s ease}
 .fp-color-trigger:hover{border-color:var(--qr-btn-hover-border);box-shadow:var(--qr-control-inset-shadow),var(--qr-control-hover-shadow)}
@@ -862,6 +882,15 @@ body {
 .fp-actions button:active{transform:translateY(0) scale(var(--qr-control-press-scale))}
 .fp-actions button:focus-visible{outline:none;box-shadow:var(--qr-control-inset-shadow),var(--qr-control-focus-shadow)}
 .fp-actions button.primary{background:var(--qr-accent);border-color:var(--qr-accent);color:var(--qr-text-on-accent)}
+.fp-actions button.danger{background:#a83d3d;border-color:#b64646;color:#fff5f5}
+.fp-actions button.danger:hover{background:#b64646;border-color:#c95656}
+.fp-toggle{display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+.fp-toggle input[type="checkbox"]{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.fp-toggle-track{position:relative;display:inline-flex;align-items:center;width:42px;height:24px;border-radius:999px;background:rgba(127,127,137,.35);border:1px solid var(--qr-btn-border);transition:background .18s ease,border-color .18s ease,box-shadow .18s ease}
+.fp-toggle-thumb{position:absolute;left:2px;top:2px;width:18px;height:18px;border-radius:50%;background:var(--qr-bg-3);transition:transform .2s cubic-bezier(.22,.8,.32,1)}
+.fp-toggle input[type="checkbox"]:checked + .fp-toggle-track{background:var(--qr-accent);border-color:var(--qr-accent);box-shadow:0 0 0 2px rgba(96,166,255,.16)}
+.fp-toggle input[type="checkbox"]:checked + .fp-toggle-track .fp-toggle-thumb{transform:translateX(18px)}
+.fp-toggle-text{font-size:12px;color:var(--qr-text-2)}
 .fp-panel.fp-compact .fp-body{flex-direction:column}
 .fp-panel.fp-compact .fp-sidebar{width:100%!important;max-width:none;min-width:0;border-right:none;border-bottom:1px solid var(--qr-topbar-border);max-height:44%}
 .fp-panel.fp-compact .fp-split-v{display:none}
@@ -2118,6 +2147,144 @@ body {
     }
   }
 
+  function getCategorySearchRows(): Array<{ id: string; fullPath: string; name: string }> {
+    if (!state.pack) return [];
+    const rows = state.pack.categories.map((cat) => {
+      const fullPath = getPath(cat.id).map((p) => p.name).join(' / ');
+      return { id: cat.id, fullPath, name: cat.name };
+    });
+    rows.sort((a, b) => a.fullPath.localeCompare(b.fullPath, 'zh-Hans-CN'));
+    return rows;
+  }
+
+  function fuzzySubsequenceScore(query: string, text: string): number {
+    if (!query) return 0;
+    let qi = 0;
+    let gaps = 0;
+    let last = -1;
+    for (let i = 0; i < text.length && qi < query.length; i++) {
+      if (text[i] === query[qi]) {
+        if (last >= 0) gaps += (i - last - 1);
+        last = i;
+        qi++;
+      }
+    }
+    if (qi !== query.length) return -1;
+    return Math.max(1, 500 - gaps);
+  }
+
+  function normalizeFuzzyText(text: string): string {
+    return String(text || '').toLowerCase().replace(/\s+|\/|｜|\||>|、|，|。/g, '');
+  }
+
+  function scoreCategoryRow(query: string, row: { fullPath: string; name: string }): number {
+    if (!query) return 1;
+    const q = normalizeFuzzyText(query);
+    if (!q) return 1;
+    const full = normalizeFuzzyText(row.fullPath);
+    const name = normalizeFuzzyText(row.name);
+    if (name.includes(q)) return 3000 - name.indexOf(q);
+    if (full.includes(q)) return 2000 - full.indexOf(q);
+    const nameSeq = fuzzySubsequenceScore(q, name);
+    if (nameSeq > 0) return 1200 + nameSeq;
+    const fullSeq = fuzzySubsequenceScore(q, full);
+    if (fullSeq > 0) return 700 + fullSeq;
+    return -1;
+  }
+
+  function mountCategorySearchableSelect(
+    card: HTMLElement,
+    opts: { pickerSelector: string; valueSelector: string; selectedId: string | null; placeholder?: string; searchPlaceholder?: string }
+  ): void {
+    const host = card.querySelector(opts.pickerSelector) as HTMLElement | null;
+    const valueInput = card.querySelector(opts.valueSelector) as HTMLInputElement | null;
+    if (!host || !valueInput) return;
+
+    const allRows = getCategorySearchRows();
+    let selectedId = opts.selectedId || allRows[0]?.id || '';
+    valueInput.value = selectedId;
+
+    host.className = 'fp-cat-picker';
+    host.innerHTML = `
+      <button type="button" class="fp-cat-picker-trigger">${opts.placeholder || '选择分类'}${iconSvg('chevron-down')}</button>
+      <div class="fp-cat-picker-panel">
+        <input class="fp-cat-picker-search" placeholder="${opts.searchPlaceholder || '搜索分类（支持模糊匹配）...'}" />
+        <div class="fp-cat-picker-list"></div>
+      </div>
+    `;
+
+    const trigger = host.querySelector('.fp-cat-picker-trigger') as HTMLButtonElement;
+    const panel = host.querySelector('.fp-cat-picker-panel') as HTMLElement;
+    const search = host.querySelector('.fp-cat-picker-search') as HTMLInputElement;
+    const list = host.querySelector('.fp-cat-picker-list') as HTMLElement;
+
+    const close = () => host.classList.remove('open');
+    const open = () => {
+      pD.querySelectorAll('.fp-cat-picker.open').forEach((el) => el.classList.remove('open'));
+      const rect = trigger.getBoundingClientRect();
+      const panelNeed = Math.min(280, (allRows.length || 1) * 32 + 56);
+      const spaceBelow = (pW.innerHeight || 0) - rect.bottom;
+      const spaceAbove = rect.top;
+      host.classList.toggle('open-up', spaceBelow < panelNeed && spaceAbove > spaceBelow);
+      host.classList.add('open');
+      search.focus();
+      search.select();
+    };
+    const syncTriggerLabel = () => {
+      const selected = allRows.find((x) => x.id === selectedId);
+      trigger.firstChild && (trigger.firstChild.textContent = selected?.fullPath || opts.placeholder || '选择分类');
+      valueInput.value = selectedId;
+    };
+
+    const render = () => {
+      const kw = search.value || '';
+      const scored = allRows
+        .map((row) => ({ row, score: scoreCategoryRow(kw, row) }))
+        .filter((x) => x.score >= 0)
+        .sort((a, b) => (b.score - a.score) || a.row.fullPath.localeCompare(b.row.fullPath, 'zh-Hans-CN'));
+      list.innerHTML = '';
+      if (!scored.length) {
+        list.innerHTML = '<div class="fp-cat-empty">无匹配分类</div>';
+        return;
+      }
+      for (const hit of scored) {
+        const btn = pD.createElement('button');
+        btn.type = 'button';
+        btn.className = `fp-cat-opt ${hit.row.id === selectedId ? 'active' : ''}`;
+        btn.textContent = hit.row.fullPath;
+        btn.onclick = () => {
+          selectedId = hit.row.id;
+          syncTriggerLabel();
+          close();
+        };
+        list.appendChild(btn);
+      }
+    };
+
+    trigger.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (host.classList.contains('open')) close();
+      else open();
+    };
+    search.oninput = render;
+    search.onkeydown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+      }
+    };
+    host.onfocusout = (e) => {
+      const next = e.relatedTarget as Node | null;
+      if (next && host.contains(next)) return;
+      close();
+    };
+    panel.onclick = (e) => e.stopPropagation();
+
+    syncTriggerLabel();
+    render();
+  }
+
   function createCircularColorPicker(opts: {
     value: string;
     options: string[];
@@ -2477,7 +2644,7 @@ body {
     if (!state.pack) return;
     showModal((close) => {
       const card = pD.createElement('div');
-      card.className = 'fp-modal-card';
+      card.className = 'fp-modal-card fp-edit-item-card';
 
       const cats = state.pack!.categories.sort((a, b) => a.order - b.order);
       const selectedCategoryId = (
@@ -2489,6 +2656,7 @@ body {
 
       card.innerHTML = `
         <div class="fp-modal-title">✏️ 编辑条目</div>
+        <div class="fp-edit-scroll">
         <div class="fp-row"><label>名称</label><input data-name value="${item ? item.name : ''}" /></div>
         <div class="fp-row"><label>执行内容</label><textarea data-content>${item ? item.content : ''}</textarea></div>
         <div class="fp-row"><label>执行方式</label>
@@ -2497,17 +2665,28 @@ body {
             <option value="inject" ${(item?.mode || state.pack!.settings.defaults.mode) === 'inject' ? 'selected' : ''}>注入到上下文</option>
           </select>
         </div>
-        <div class="fp-row"><label>所属分类</label>
-          <select data-cat>${cats.map((c) => `<option value="${c.id}" ${(selectedCategoryId === c.id) ? 'selected' : ''}>${c.name}</option>`).join('')}</select>
+        <div class="fp-row fp-row-block"><label>所属分类</label>
+          <div class="fp-cat-field">
+            <div data-cat-picker></div>
+            <input type="hidden" data-cat />
+          </div>
         </div>
         ${buildPlaceholderQuickInsertRow('变量快捷')}
+        </div>
         <div class="fp-actions">
-          ${item ? '<button data-del>删除</button>' : ''}
+          ${item ? '<button class="danger" data-del>删除</button>' : ''}
           <button data-close>取消</button>
           <button class="primary" data-save>${item ? '保存' : '创建'}</button>
         </div>
       `;
 
+      mountCategorySearchableSelect(card, {
+        pickerSelector: '[data-cat-picker]',
+        valueSelector: '[data-cat]',
+        selectedId: selectedCategoryId,
+        placeholder: '选择所属分类',
+        searchPlaceholder: '搜索分类（支持模糊匹配）...',
+      });
       mountPlaceholderQuickInsert(card, { chipsSelector: '[data-ph-chips]', targetSelector: '[data-content]' });
 
       if (item) {
@@ -2526,7 +2705,7 @@ body {
         const name = (card.querySelector('[data-name]') as HTMLInputElement | null)?.value.trim();
         const content = (card.querySelector('[data-content]') as HTMLTextAreaElement | null)?.value.trim();
         const mode = (card.querySelector('[data-mode]') as HTMLSelectElement | null)?.value === 'inject' ? 'inject' : 'append';
-        const categoryId = (card.querySelector('[data-cat]') as HTMLSelectElement | null)?.value;
+        const categoryId = (card.querySelector('[data-cat]') as HTMLInputElement | null)?.value;
         if (!name || !content) {
           toast('名称和执行内容不能为空');
           return;
@@ -2561,7 +2740,7 @@ body {
     if (!state.pack) return;
     showModal((close) => {
       const card = pD.createElement('div');
-      card.className = 'fp-modal-card';
+      card.className = 'fp-modal-card fp-edit-item-card';
 
       const cats = state.pack!.categories.sort((a, b) => a.order - b.order);
       const selectedCategoryId = (
@@ -2571,7 +2750,8 @@ body {
       const defaultName = `自定义_${new Date().toLocaleTimeString('zh-CN', { hour12: false }).replace(/:/g, '')}`;
 
       card.innerHTML = `
-        <div class="fp-modal-title">✨ 自定义连接内容</div>
+        <div class="fp-modal-title">✨ 快速添加自定义</div>
+        <div class="fp-edit-scroll">
         <div class="fp-row"><label>名称</label><input data-name value="${defaultName}" placeholder="如：转场总结" /></div>
         <div class="fp-row"><label>执行内容</label><textarea data-content placeholder="输入要发送的内容..."></textarea></div>
         <div class="fp-row"><label>执行方式</label>
@@ -2583,13 +2763,18 @@ body {
         ${buildPlaceholderQuickInsertRow('插入占位符')}
         <div class="fp-row fp-save-toggle">
           <label>保存到库</label>
-          <label style="display:flex;align-items:center;gap:8px;width:auto;font-size:12px;color:var(--qr-text-2)">
+          <label class="fp-toggle" style="width:auto">
             <input type="checkbox" data-save-lib checked />
-            <span>确认后同时创建条目</span>
+            <span class="fp-toggle-track"><span class="fp-toggle-thumb"></span></span>
+            <span class="fp-toggle-text">确认后同时创建条目</span>
           </label>
         </div>
-        <div class="fp-row" data-save-cat-wrap><label>保存分类</label>
-          <select data-save-cat>${cats.map((c) => `<option value="${c.id}" ${(selectedCategoryId === c.id) ? 'selected' : ''}>${c.name}</option>`).join('')}</select>
+        <div class="fp-row fp-row-block" data-save-cat-wrap><label>保存分类</label>
+          <div class="fp-cat-field">
+            <div data-save-cat-picker></div>
+            <input type="hidden" data-save-cat />
+          </div>
+        </div>
         </div>
         <div class="fp-actions">
           <button data-close>取消</button>
@@ -2597,6 +2782,13 @@ body {
         </div>
       `;
 
+      mountCategorySearchableSelect(card, {
+        pickerSelector: '[data-save-cat-picker]',
+        valueSelector: '[data-save-cat]',
+        selectedId: selectedCategoryId,
+        placeholder: '选择保存分类',
+        searchPlaceholder: '搜索分类（支持模糊匹配）...',
+      });
       mountPlaceholderQuickInsert(card, { chipsSelector: '[data-ph-chips]', targetSelector: '[data-content]' });
 
       const saveLibEl = card.querySelector('[data-save-lib]') as HTMLInputElement | null;
@@ -2615,7 +2807,7 @@ body {
         const contentInput = (card.querySelector('[data-content]') as HTMLTextAreaElement | null)?.value.trim();
         const mode = (card.querySelector('[data-mode]') as HTMLSelectElement | null)?.value === 'inject' ? 'inject' : 'append';
         const shouldSave = !!(card.querySelector('[data-save-lib]') as HTMLInputElement | null)?.checked;
-        const categoryId = (card.querySelector('[data-save-cat]') as HTMLSelectElement | null)?.value || null;
+        const categoryId = (card.querySelector('[data-save-cat]') as HTMLInputElement | null)?.value || null;
 
         if (!contentInput) {
           toast('执行内容不能为空');
@@ -3440,14 +3632,24 @@ body {
           card.className = 'fp-modal-card';
           card.innerHTML = `
             <div class="fp-modal-title">移动条目：${item.name}</div>
-            <div class="fp-row"><label>目标分类</label>
-              <select data-target>${state.pack?.categories.map((c) => `<option value="${c.id}" ${c.id === item.categoryId ? 'selected' : ''}>${c.name}</option>`).join('') || ''}</select>
+            <div class="fp-row fp-row-block"><label>目标分类</label>
+              <div class="fp-cat-field">
+                <div data-target-picker></div>
+                <input type="hidden" data-target />
+              </div>
             </div>
             <div class="fp-actions"><button data-close>取消</button><button class="primary" data-ok>移动</button></div>
           `;
+          mountCategorySearchableSelect(card, {
+            pickerSelector: '[data-target-picker]',
+            valueSelector: '[data-target]',
+            selectedId: item.categoryId || null,
+            placeholder: '选择目标分类',
+            searchPlaceholder: '搜索分类（支持模糊匹配）...',
+          });
           (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = close;
           (card.querySelector('[data-ok]') as HTMLElement | null)!.onclick = () => {
-            moveItemToCategory(item.id, (card.querySelector('[data-target]') as HTMLSelectElement | null)?.value || '');
+            moveItemToCategory(item.id, (card.querySelector('[data-target]') as HTMLInputElement | null)?.value || '');
             renderWorkbench();
             toast('条目已移动');
             close();
@@ -3888,7 +4090,7 @@ body {
         </span>
       </button>
     `;
-    const customConnectorBtnHtml = `<button class="fp-btn fp-quick-custom-btn" data-conn-custom title="自定义连接内容">${iconSvg('custom')}自定义</button>`;
+    const customConnectorBtnHtml = `<button class="fp-btn fp-quick-custom-btn" data-conn-custom title="快速添加自定义">${iconSvg('custom')}自定义</button>`;
 
     if (compact) {
       top.innerHTML = `
