@@ -449,7 +449,7 @@
     const style = pD.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
-#${OVERLAY_ID}{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:flex-start;justify-content:center;background:radial-gradient(1200px 520px at 12% 0%,rgba(255,255,255,.25),transparent 56%),radial-gradient(1000px 560px at 92% 8%,rgba(244,228,204,.34),transparent 54%),rgba(10,10,12,.52);backdrop-filter:blur(7px);overflow:auto;padding:8px;scrollbar-gutter:stable}
+#${OVERLAY_ID}{position:fixed;inset:0;width:100vw;height:100vh;z-index:2147483000;display:flex;align-items:flex-start;justify-content:center;background:radial-gradient(1200px 520px at 12% 0%,rgba(255,255,255,.25),transparent 56%),radial-gradient(1000px 560px at 92% 8%,rgba(244,228,204,.34),transparent 54%),rgba(10,10,12,.52);backdrop-filter:blur(7px);overflow:auto;padding:8px;scrollbar-gutter:stable}
 #${OVERLAY_ID} *{box-sizing:border-box}
 .fp-panel{position:relative;display:flex;flex-direction:column;border-radius:20px;overflow:hidden;border:1px solid rgba(27,27,30,.14);background:linear-gradient(180deg,#f9f6f0 0%,#f3eee5 100%);box-shadow:0 28px 70px rgba(0,0,0,.30);color:#1f2023;font-family:'Manrope','Noto Sans SC','Segoe UI',sans-serif;flex-shrink:0;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);margin:8px auto}
 .fp-top{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;padding:10px 12px;border-bottom:1px solid rgba(26,26,30,.10);background:linear-gradient(180deg,#ffffff,#f5f2ea);column-gap:10px}
@@ -2120,6 +2120,48 @@
 
     pD.body.appendChild(overlay);
     overlay.appendChild(panel);
+
+    // 小窗口兼容性修复：检测 overlay 的实际渲染尺寸
+    // 如果 position:fixed 被父容器的 transform/filter/contain 等属性约束，
+    // 则 getBoundingClientRect 的尺寸会明显小于预期视口尺寸
+    requestAnimationFrame(() => {
+      try {
+        const rect = overlay.getBoundingClientRect();
+        const expectedW = pW.innerWidth || window.innerWidth || 320;
+        const expectedH = pW.innerHeight || window.innerHeight || 360;
+        const actualW = rect.width;
+        const actualH = rect.height;
+        // 如果实际尺寸明显小于预期（低于 50% 或小于 200px），说明 fixed 定位被约束
+        const isConstrained = actualW < Math.min(200, expectedW * 0.5) || actualH < Math.min(200, expectedH * 0.5);
+        if (isConstrained) {
+          // 尝试方案1：挂载到 window.top.document.body
+          let remounted = false;
+          try {
+            if (window.top && window.top.document && window.top.document.body && window.top !== pW) {
+              const topBody = window.top.document.body;
+              // 移除旧位置的 overlay
+              overlay.remove();
+              // 挂载到顶层
+              topBody.appendChild(overlay);
+              remounted = true;
+            }
+          } catch (e) {
+            // 跨域访问失败，忽略
+          }
+          // 如果无法挂载到顶层，使用 absolute 定位 + 动态尺寸
+          if (!remounted) {
+            overlay.style.position = 'absolute';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.width = `${expectedW}px`;
+            overlay.style.height = `${expectedH}px`;
+            overlay.style.inset = 'auto';
+          }
+        }
+      } catch (e) {
+        // 兼容性保护，忽略错误
+      }
+    });
 
     applyFitPanelSize();
     persistPack();
