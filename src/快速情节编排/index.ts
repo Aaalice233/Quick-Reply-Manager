@@ -9,12 +9,79 @@
   const TOAST_CONTAINER_ID = 'fast-plot-toast-container';
   const DATA_VERSION = 1;
 
-  function resolveHostWindow() {
-    const candidates = [];
-    try { if (window.top) candidates.push(window.top); } catch (e) {}
-    try { if (window.parent) candidates.push(window.parent); } catch (e) {}
+  interface PackMeta {
+    version: number;
+    createdAt: string;
+    updatedAt?: string;
+    source: string;
+    name: string;
+  }
+
+  interface Category {
+    id: string;
+    name: string;
+    parentId: string | null;
+    order: number;
+    collapsed: boolean;
+  }
+
+  interface Item {
+    id: string;
+    categoryId: string | null;
+    name: string;
+    content: string;
+    mode: 'append' | 'inject';
+    favorite: boolean;
+    order: number;
+  }
+
+  interface Settings {
+    placeholders: Record<string, string>;
+    tokens: { simultaneous: string; then: string };
+    toast: { maxStack: number; timeout: number };
+    defaults: { mode: 'append' | 'inject'; previewExpanded: boolean };
+    ui: { theme: string };
+  }
+
+  interface UiState {
+    sidebar: { expanded: Record<string, boolean>; width: number; collapsed: boolean };
+    preview: { expanded: boolean; height: number; tokens: Array<{ id: string; type: string; label: string }> };
+    panelSize: { width: number; height: number };
+    lastPath: string[];
+  }
+
+  interface Pack {
+    meta: PackMeta;
+    categories: Category[];
+    items: Item[];
+    settings: Settings;
+    uiState: UiState;
+    favorites: string[];
+  }
+
+  interface DragData {
+    type: 'category' | 'item';
+    id: string;
+  }
+
+  interface AppState {
+    pack: Pack | null;
+    currentCategoryId: string | null;
+    history: (string | null)[];
+    filter: string;
+    contextMenu: HTMLElement | null;
+    longPressTimer: ReturnType<typeof setTimeout> | null;
+    dragData: DragData | null;
+    hostResizeHandler: (() => void) | null;
+    resizeRaf: number | null;
+  }
+
+  function resolveHostWindow(): Window {
+    const candidates: Window[] = [];
+    try { if (window.top) candidates.push(window.top); } catch (e) { /* ignore */ }
+    try { if (window.parent) candidates.push(window.parent); } catch (e) { /* ignore */ }
     candidates.push(window);
-    let best = window;
+    let best: Window = window;
     let bestArea = 0;
     for (const w of candidates) {
       try {
@@ -23,7 +90,7 @@
           best = w;
           bestArea = area;
         }
-      } catch (e) {}
+      } catch (e) { /* ignore */ }
     }
     return best;
   }
@@ -31,7 +98,7 @@
   const pW = resolveHostWindow();
   const pD = pW.document || document;
 
-  const state = {
+  const state: AppState = {
     pack: null,
     currentCategoryId: null,
     history: [],
@@ -43,11 +110,11 @@
     resizeRaf: null,
   };
 
-  function uid(prefix) {
+  function uid(prefix: string): string {
     return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
   }
 
-  function deepClone(v) {
+  function deepClone<T>(v: T): T {
     return JSON.parse(JSON.stringify(v));
   }
 
@@ -105,10 +172,11 @@
     pW.addEventListener('resize', state.hostResizeHandler);
   }
 
-  function getContext() {
+  function getContext(): unknown {
     try {
-      if (pW.SillyTavern?.getContext) return pW.SillyTavern.getContext();
-    } catch (e) {}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if ((pW as any).SillyTavern?.getContext) return (pW as any).SillyTavern.getContext();
+    } catch (e) { /* ignore */ }
     return null;
   }
 
@@ -127,7 +195,7 @@
     }
   }
 
-  function saveScriptStoreRaw(data) {
+  function saveScriptStoreRaw(data: Pack): void {
     try {
       if (typeof insertOrAssignVariables === 'function') {
         insertOrAssignVariables({ [STORE_KEY]: data }, { type: 'script' });
@@ -149,21 +217,21 @@
     }
   }
 
-  function normalizePack(pack) {
-    const safe = pack && typeof pack === 'object' ? deepClone(pack) : {};
+  function normalizePack(pack: unknown): Pack {
+    const safe = (pack && typeof pack === 'object' ? deepClone(pack as Pack) : {}) as Partial<Pack>;
 
-    safe.meta = safe.meta || {};
-    safe.meta.version = Number(safe.meta.version) || DATA_VERSION;
-    safe.meta.createdAt = safe.meta.createdAt || nowIso();
-    safe.meta.updatedAt = nowIso();
-    safe.meta.source = safe.meta.source || SCRIPT_LABEL;
-    safe.meta.name = safe.meta.name || '💌快速情节编排数据';
+    safe.meta = safe.meta || {} as PackMeta;
+    safe.meta!.version = Number(safe.meta!.version) || DATA_VERSION;
+    safe.meta!.createdAt = safe.meta!.createdAt || nowIso();
+    safe.meta!.updatedAt = nowIso();
+    safe.meta!.source = safe.meta!.source || SCRIPT_LABEL;
+    safe.meta!.name = safe.meta!.name || '💌快速情节编排数据';
 
     safe.categories = Array.isArray(safe.categories) ? safe.categories : [];
     safe.items = Array.isArray(safe.items) ? safe.items : [];
 
-    safe.settings = safe.settings || {};
-    safe.settings.placeholders = safe.settings.placeholders || {
+    safe.settings = safe.settings || {} as Settings;
+    safe.settings!.placeholders = safe.settings!.placeholders || {
       用户: '用户',
       角色: '角色',
       苦主: '苦主',
@@ -171,49 +239,49 @@
       同时: '同时',
       然后: '然后',
     };
-    safe.settings.tokens = safe.settings.tokens || {
+    safe.settings!.tokens = safe.settings!.tokens || {
       simultaneous: '<同时>',
       then: '<然后>',
     };
-    safe.settings.toast = safe.settings.toast || {
+    safe.settings!.toast = safe.settings!.toast || {
       maxStack: 4,
       timeout: 1800,
     };
-    safe.settings.defaults = safe.settings.defaults || {
+    safe.settings!.defaults = safe.settings!.defaults || {
       mode: 'append',
       previewExpanded: true,
     };
-    safe.settings.ui = safe.settings.ui || {
+    safe.settings!.ui = safe.settings!.ui || {
       theme: 'herdi-light',
     };
 
-    safe.uiState = safe.uiState || {};
-    safe.uiState.sidebar = safe.uiState.sidebar || {
+    safe.uiState = safe.uiState || {} as UiState;
+    safe.uiState!.sidebar = safe.uiState!.sidebar || {
       expanded: {},
       width: 280,
       collapsed: false,
     };
-    safe.uiState.preview = safe.uiState.preview || {
+    safe.uiState!.preview = safe.uiState!.preview || {
       expanded: true,
       height: 140,
       tokens: [],
     };
-    if (!safe.uiState.panelSize || typeof safe.uiState.panelSize !== 'object') safe.uiState.panelSize = {};
+    if (!safe.uiState!.panelSize || typeof safe.uiState!.panelSize !== 'object') safe.uiState!.panelSize = {} as UiState['panelSize'];
     const vp = getViewportSize();
     const fallbackWidth = Math.max(1040, Math.min(vp.width * 0.86, vp.width - 16));
     const fallbackHeight = Math.max(660, Math.min(vp.height * 0.88, vp.height - 16));
-    safe.uiState.panelSize.width = Number(safe.uiState.panelSize.width) || fallbackWidth;
-    safe.uiState.panelSize.height = Number(safe.uiState.panelSize.height) || fallbackHeight;
-    safe.uiState.lastPath = safe.uiState.lastPath || [];
+    safe.uiState!.panelSize!.width = Number(safe.uiState!.panelSize!.width) || fallbackWidth;
+    safe.uiState!.panelSize!.height = Number(safe.uiState!.panelSize!.height) || fallbackHeight;
+    safe.uiState!.lastPath = safe.uiState!.lastPath || [];
 
     safe.favorites = Array.isArray(safe.favorites) ? safe.favorites : [];
 
-    const categoryIds = new Set();
+    const categoryIds = new Set<string>();
     for (const cat of safe.categories) {
       if (!cat.id) cat.id = uid('cat');
       if (typeof cat.order !== 'number') cat.order = 0;
       if (typeof cat.collapsed !== 'boolean') cat.collapsed = false;
-      if (!('parentId' in cat)) cat.parentId = null;
+      if (!('parentId' in cat)) (cat as Category).parentId = null;
       categoryIds.add(cat.id);
     }
 
@@ -229,11 +297,11 @@
 
     safe.favorites = safe.items.filter((i) => i.favorite).map((i) => i.id);
 
-    if (safe.meta.version < DATA_VERSION) {
-      safe.meta.version = DATA_VERSION;
+    if (safe.meta!.version < DATA_VERSION) {
+      safe.meta!.version = DATA_VERSION;
     }
 
-    return safe;
+    return safe as Pack;
   }
 
   function buildDefaultPack() {
@@ -381,9 +449,9 @@
     const style = pD.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
-#${OVERLAY_ID}{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;background:radial-gradient(1200px 520px at 12% 0%,rgba(255,255,255,.25),transparent 56%),radial-gradient(1000px 560px at 92% 8%,rgba(244,228,204,.34),transparent 54%),rgba(10,10,12,.52);backdrop-filter:blur(7px)}
+#${OVERLAY_ID}{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:flex-start;justify-content:center;background:radial-gradient(1200px 520px at 12% 0%,rgba(255,255,255,.25),transparent 56%),radial-gradient(1000px 560px at 92% 8%,rgba(244,228,204,.34),transparent 54%),rgba(10,10,12,.52);backdrop-filter:blur(7px);overflow:auto;padding:8px;scrollbar-gutter:stable}
 #${OVERLAY_ID} *{box-sizing:border-box}
-.fp-panel{position:relative;display:flex;flex-direction:column;border-radius:20px;overflow:hidden;border:1px solid rgba(27,27,30,.14);background:linear-gradient(180deg,#f9f6f0 0%,#f3eee5 100%);box-shadow:0 28px 70px rgba(0,0,0,.30);color:#1f2023;font-family:'Manrope','Noto Sans SC','Segoe UI',sans-serif}
+.fp-panel{position:relative;display:flex;flex-direction:column;border-radius:20px;overflow:hidden;border:1px solid rgba(27,27,30,.14);background:linear-gradient(180deg,#f9f6f0 0%,#f3eee5 100%);box-shadow:0 28px 70px rgba(0,0,0,.30);color:#1f2023;font-family:'Manrope','Noto Sans SC','Segoe UI',sans-serif;flex-shrink:0;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);margin:8px auto}
 .fp-top{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;padding:10px 12px;border-bottom:1px solid rgba(26,26,30,.10);background:linear-gradient(180deg,#ffffff,#f5f2ea);column-gap:10px}
 .fp-left,.fp-right{display:flex;align-items:center;gap:8px}
 .fp-right{justify-content:flex-end;min-width:0;overflow:auto}
@@ -502,11 +570,13 @@
     return c;
   }
 
-  function toast(message) {
+  function toast(message: string): void {
     const c = ensureToastContainer();
     const max = Math.max(1, Number(state.pack?.settings?.toast?.maxStack || 4));
     const timeout = Math.max(600, Number(state.pack?.settings?.toast?.timeout || 1800));
-    while (c.children.length >= max) c.removeChild(c.firstElementChild);
+    while (c.children.length >= max && c.firstElementChild) {
+      c.removeChild(c.firstElementChild);
+    }
     const t = pD.createElement('div');
     t.className = 'fp-toast';
     t.textContent = String(message || '操作已执行');
@@ -514,15 +584,17 @@
     setTimeout(() => t.remove(), timeout);
   }
 
-  function getCategoryById(id) {
+  function getCategoryById(id: string | null): Category | null {
+    if (!state.pack || !id) return null;
     return state.pack.categories.find((c) => c.id === id) || null;
   }
 
-  function getItemsByCategory(catId, includeDesc = true) {
+  function getItemsByCategory(catId: string | null, includeDesc = true): Item[] {
+    if (!state.pack || !catId) return [];
     if (!includeDesc) {
       return state.pack.items.filter((i) => i.categoryId === catId).sort((a, b) => a.order - b.order);
     }
-    const ids = new Set([catId]);
+    const ids = new Set<string>([catId]);
     let changed = true;
     while (changed) {
       changed = false;
@@ -533,13 +605,13 @@
         }
       }
     }
-    return state.pack.items.filter((i) => ids.has(i.categoryId)).sort((a, b) => a.order - b.order);
+    return state.pack.items.filter((i) => ids.has(i.categoryId || '')).sort((a, b) => a.order - b.order);
   }
 
-  function getPath(id) {
-    const res = [];
+  function getPath(id: string | null): Category[] {
+    const res: Category[] = [];
     let cur = getCategoryById(id);
-    const guard = new Set();
+    const guard = new Set<string>();
     while (cur && !guard.has(cur.id)) {
       guard.add(cur.id);
       res.unshift(cur);
@@ -548,17 +620,17 @@
     return res;
   }
 
-  function resolvePlaceholders(text) {
-    const placeholders = state.pack.settings.placeholders || {};
-    return String(text || '').replace(/\{@([^:}]+)(?::([^}]*))?\}/g, (_, key, fallback) => {
+  function resolvePlaceholders(text: string): string {
+    const placeholders = state.pack?.settings?.placeholders || {};
+    return String(text || '').replace(/\{@([^:}]+)(?::([^}]*))?\}/g, (_, key: string, fallback: string) => {
       const v = placeholders[key];
       if (v !== undefined && String(v).length > 0) return String(v);
       return fallback !== undefined ? String(fallback) : '';
     });
   }
 
-  function iconSvg(name) {
-    const map = {
+  function iconSvg(name: string): string {
+    const map: Record<string, string> = {
       back: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M9.8 3.2 5 8l4.8 4.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.4 8h5.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
       then: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="m8.5 4.8 3.5 3.2-3.5 3.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
       simul: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 5.2h10M3 10.8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="6" cy="5.2" r="1.2" fill="currentColor"/><circle cx="10" cy="10.8" r="1.2" fill="currentColor"/></svg>',
@@ -572,7 +644,7 @@
     return map[name] || '';
   }
 
-  function renderTopButton(opts) {
+  function renderTopButton(opts?: { data?: string; className?: string; iconOnly?: boolean; label?: string; icon?: string; title?: string }): string {
     const o = opts || {};
     const dataKey = o.data || '';
     const cls = `fp-btn ${o.className || ''} ${o.iconOnly ? 'icon-only' : ''}`.trim();
@@ -580,8 +652,8 @@
     return `<button class="${cls}" ${dataKey ? `data-${dataKey}` : ''} title="${o.title || o.label || ''}">${iconSvg(o.icon || '')}${label}</button>`;
   }
 
-  function appendToInput(content) {
-    const ta = pD.querySelector('#send_textarea');
+  function appendToInput(content: string): void {
+    const ta = pD.querySelector('#send_textarea') as HTMLTextAreaElement | null;
     if (!ta) {
       toast('未找到输入框');
       return;
@@ -592,7 +664,7 @@
     ta.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
-  async function injectContent(content, itemName) {
+  async function injectContent(content: string, itemName: string): Promise<boolean> {
     try {
       if (typeof injectPrompts === 'function') {
         injectPrompts([
@@ -609,7 +681,8 @@
     } catch (e) {}
 
     try {
-      const ctx = getContext();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = getContext() as any;
       if (ctx?.executeSlashCommandsWithOptions) {
         const safe = content.replace(/"/g, '\\"');
         await ctx.executeSlashCommandsWithOptions(`/inject id=${uid('inj')} "${safe}"`);
@@ -621,7 +694,8 @@
     return false;
   }
 
-  function pushPreviewToken(type, label) {
+  function pushPreviewToken(type: string, label: string): void {
+    if (!state.pack) return;
     const arr = state.pack.uiState.preview.tokens || [];
     arr.push({ id: uid('tok'), type, label: String(label || '') });
     if (arr.length > 120) arr.splice(0, arr.length - 120);
@@ -630,15 +704,15 @@
     refreshPreviewPanel();
   }
 
-  function refreshPreviewPanel() {
+  function refreshPreviewPanel(): void {
     const overlay = pD.getElementById(OVERLAY_ID);
     if (!overlay) return;
-    const previewEl = overlay.querySelector('.fp-preview');
+    const previewEl = overlay.querySelector('.fp-preview') as HTMLElement | null;
     if (!previewEl) return;
     renderPreview(previewEl);
   }
 
-  async function runItem(item) {
+  async function runItem(item: Item): Promise<void> {
     const parsed = resolvePlaceholders(item.content || '');
     if (item.mode === 'inject') {
       const ok = await injectContent(parsed, item.name);
@@ -654,7 +728,8 @@
     toast(`已追加: ${item.name}`);
   }
 
-  function addConnector(type) {
+  function addConnector(type: 'then' | 'simultaneous'): void {
+    if (!state.pack) return;
     const token = type === 'then'
       ? state.pack.settings.tokens.then
       : state.pack.settings.tokens.simultaneous;
@@ -670,24 +745,26 @@
     }
   }
 
-  function renderPath(pathEl) {
+  function renderPath(pathEl: HTMLElement): void {
+    if (!state.pack) return;
     const nodes = getPath(state.currentCategoryId);
     state.pack.uiState.lastPath = nodes.map((n) => n.id);
     pathEl.textContent = nodes.map((n) => n.name).join('  /  ') || '未选择分类';
   }
 
-  function treeChildren(parentId) {
+  function treeChildren(parentId: string | null): Category[] {
+    if (!state.pack) return [];
     return state.pack.categories
       .filter((c) => c.parentId === parentId)
       .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
   }
 
-  function moveCategory(dragId, targetId) {
+  function moveCategory(dragId: string, targetId: string): void {
     if (!dragId || !targetId || dragId === targetId) return;
     const drag = getCategoryById(dragId);
     const target = getCategoryById(targetId);
     if (!drag || !target) return;
-    let p = target;
+    let p: Category | null = target;
     while (p) {
       if (p.id === drag.id) return;
       p = p.parentId ? getCategoryById(p.parentId) : null;
@@ -698,7 +775,8 @@
     persistPack();
   }
 
-  function moveItemToCategory(itemId, targetCatId) {
+  function moveItemToCategory(itemId: string, targetCatId: string): void {
+    if (!state.pack) return;
     const item = state.pack.items.find((i) => i.id === itemId);
     if (!item || !getCategoryById(targetCatId)) return;
     item.categoryId = targetCatId;
@@ -706,7 +784,7 @@
     persistPack();
   }
 
-  function renderTree(treeEl, onSelect) {
+  function renderTree(treeEl: HTMLElement, onSelect: () => void): void {
     treeEl.innerHTML = '';
 
     const favNode = pD.createElement('div');
@@ -720,10 +798,11 @@
     treeEl.appendChild(favNode);
 
     const roots = treeChildren(null);
+    if (!state.pack) return;
     const expanded = state.pack.uiState.sidebar.expanded || {};
     const keyword = (state.filter || '').trim().toLowerCase();
 
-    const categoryHasMatch = (catId) => {
+    const categoryHasMatch = (catId: string): boolean => {
       if (!keyword) return true;
       const cat = getCategoryById(catId);
       if (!cat) return false;
@@ -736,7 +815,7 @@
       return children.some((child) => categoryHasMatch(child.id));
     };
 
-    const createNode = (cat, depth) => {
+    const createNode = (cat: Category, depth: number): void => {
       if (!categoryHasMatch(cat.id)) return;
       const node = pD.createElement('div');
       node.className = `fp-tree-node ${state.currentCategoryId === cat.id ? 'active' : ''}`;
@@ -761,7 +840,7 @@
 
       node.addEventListener('dragstart', (e) => {
         state.dragData = { type: 'category', id: cat.id };
-        e.dataTransfer.effectAllowed = 'move';
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
       });
       node.addEventListener('dragover', (e) => {
         e.preventDefault();
@@ -798,6 +877,7 @@
     const keyword = (state.filter || '').trim().toLowerCase();
 
     if (state.currentCategoryId === '__favorites__') {
+      if (!state.pack) return [];
       const favs = state.pack.items.filter((i) => i.favorite);
       const filtered = keyword
         ? favs.filter((i) => i.name.toLowerCase().includes(keyword) || (i.content || '').toLowerCase().includes(keyword))
@@ -805,7 +885,7 @@
       return [{ groupId: '__favorites__', groupName: '❤ 收藏条目', items: filtered }];
     }
 
-    const focus = getCategoryById(state.currentCategoryId) || state.pack.categories.find((c) => c.parentId === null);
+    const focus = getCategoryById(state.currentCategoryId) || (state.pack?.categories.find((c) => c.parentId === null) || null);
     if (!focus) return [];
 
     const directChildren = treeChildren(focus.id);
@@ -841,29 +921,30 @@
     return groups;
   }
 
-  function showModal(contentFactory) {
+  function showModal(contentFactory: (close: () => void) => HTMLElement): void {
     const overlay = pD.getElementById(OVERLAY_ID);
     if (!overlay) return;
-    let container = overlay.querySelector('.fp-modal');
+    let container = overlay.querySelector('.fp-modal') as HTMLElement | null;
     if (container) container.remove();
     container = pD.createElement('div');
     container.className = 'fp-modal';
-    container.appendChild(contentFactory(() => container.remove()));
+    container.appendChild(contentFactory(() => container!.remove()));
     overlay.appendChild(container);
   }
 
-  function openSettingsModal() {
+  function openSettingsModal(): void {
+    if (!state.pack) return;
     showModal((close) => {
       const card = pD.createElement('div');
       card.className = 'fp-modal-card';
 
-      const placeholders = state.pack.settings.placeholders || {};
+      const placeholders = state.pack!.settings.placeholders || {};
       const rows = ['用户', '角色', '苦主', '黄毛', '同时', '然后'];
 
       const customKeys = Object.keys(placeholders).filter((k) => !rows.includes(k));
-      const ui = state.pack.settings.ui || {};
+      const ui = state.pack!.settings.ui || {};
       const currentTheme = ui.theme || 'herdi-light';
-      const toastSettings = state.pack.settings.toast || { maxStack: 4, timeout: 1800 };
+      const toastSettings = state.pack!.settings.toast || { maxStack: 4, timeout: 1800 };
 
       card.innerHTML = `
         <div class="fp-modal-title">⚙️ 设置中心</div>
@@ -882,12 +963,12 @@
               ${customKeys.length ? `<div class="fp-row"><label>现有扩展</label><textarea readonly>${customKeys.map((k) => `${k}=${placeholders[k]}`).join('\n')}</textarea></div>` : ''}
             </div>
             <div class="fp-tab" data-tab="tokens">
-              <div class="fp-row"><label>同时按钮文本</label><input data-token="simultaneous" value="${state.pack.settings.tokens.simultaneous || '<同时>'}" /></div>
-              <div class="fp-row"><label>然后按钮文本</label><input data-token="then" value="${state.pack.settings.tokens.then || '<然后>'}" /></div>
+              <div class="fp-row"><label>同时按钮文本</label><input data-token="simultaneous" value="${state.pack!.settings.tokens.simultaneous || '<同时>'}" /></div>
+              <div class="fp-row"><label>然后按钮文本</label><input data-token="then" value="${state.pack!.settings.tokens.then || '<然后>'}" /></div>
               <div class="fp-row"><label>默认执行方式</label>
                 <select data-default-mode>
-                  <option value="append" ${state.pack.settings.defaults.mode === 'append' ? 'selected' : ''}>追加到输入框</option>
-                  <option value="inject" ${state.pack.settings.defaults.mode === 'inject' ? 'selected' : ''}>注入上下文</option>
+                  <option value="append" ${state.pack!.settings.defaults.mode === 'append' ? 'selected' : ''}>追加到输入框</option>
+                  <option value="inject" ${state.pack!.settings.defaults.mode === 'inject' ? 'selected' : ''}>注入上下文</option>
                 </select>
               </div>
             </div>
@@ -915,34 +996,34 @@
       const tabBtns = card.querySelectorAll('[data-tab-btn]');
       const tabs = card.querySelectorAll('[data-tab]');
       for (const btn of tabBtns) {
-        btn.onclick = () => {
+        (btn as HTMLElement).onclick = () => {
           const key = btn.getAttribute('data-tab-btn');
           for (const b of tabBtns) b.classList.toggle('active', b === btn);
           for (const t of tabs) t.classList.toggle('active', t.getAttribute('data-tab') === key);
         };
       }
 
-      card.querySelector('[data-close]').onclick = close;
-      card.querySelector('[data-save]').onclick = () => {
+      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = close;
+      (card.querySelector('[data-save]') as HTMLElement | null)!.onclick = () => {
         for (const k of rows) {
-          const el = card.querySelector(`[data-ph="${k}"]`);
-          placeholders[k] = String(el.value || '').trim() || k;
+          const el = card.querySelector(`[data-ph="${k}"]`) as HTMLInputElement | null;
+          placeholders[k] = String(el?.value || '').trim() || k;
         }
-        const tokenSim = card.querySelector('[data-token="simultaneous"]').value.trim();
-        const tokenThen = card.querySelector('[data-token="then"]').value.trim();
-        state.pack.settings.tokens.simultaneous = tokenSim || '<同时>';
-        state.pack.settings.tokens.then = tokenThen || '<然后>';
-        state.pack.settings.defaults.mode = card.querySelector('[data-default-mode]').value === 'inject' ? 'inject' : 'append';
-        state.pack.settings.ui = state.pack.settings.ui || {};
-        state.pack.settings.ui.theme = card.querySelector('[data-theme]').value || 'herdi-light';
-        const toastMax = Number(card.querySelector('[data-toast-max]').value || 4);
-        const toastTimeout = Number(card.querySelector('[data-toast-timeout]').value || 1800);
-        state.pack.settings.toast.maxStack = Math.max(1, Math.min(8, toastMax || 4));
-        state.pack.settings.toast.timeout = Math.max(600, Math.min(8000, toastTimeout || 1800));
-        const newKey = card.querySelector('[data-new-key]').value.trim();
-        const newVal = card.querySelector('[data-new-val]').value.trim();
+        const tokenSim = (card.querySelector('[data-token="simultaneous"]') as HTMLInputElement | null)?.value.trim();
+        const tokenThen = (card.querySelector('[data-token="then"]') as HTMLInputElement | null)?.value.trim();
+        state.pack!.settings.tokens.simultaneous = tokenSim || '<同时>';
+        state.pack!.settings.tokens.then = tokenThen || '<然后>';
+        state.pack!.settings.defaults.mode = (card.querySelector('[data-default-mode]') as HTMLSelectElement | null)?.value === 'inject' ? 'inject' : 'append';
+        state.pack!.settings.ui = state.pack!.settings.ui || {};
+        state.pack!.settings.ui.theme = (card.querySelector('[data-theme]') as HTMLSelectElement | null)?.value || 'herdi-light';
+        const toastMax = Number((card.querySelector('[data-toast-max]') as HTMLInputElement | null)?.value || 4);
+        const toastTimeout = Number((card.querySelector('[data-toast-timeout]') as HTMLInputElement | null)?.value || 1800);
+        state.pack!.settings.toast.maxStack = Math.max(1, Math.min(8, toastMax || 4));
+        state.pack!.settings.toast.timeout = Math.max(600, Math.min(8000, toastTimeout || 1800));
+        const newKey = (card.querySelector('[data-new-key]') as HTMLInputElement | null)?.value.trim();
+        const newVal = (card.querySelector('[data-new-val]') as HTMLInputElement | null)?.value.trim();
         if (newKey) placeholders[newKey] = newVal || newKey;
-        state.pack.settings.placeholders = placeholders;
+        state.pack!.settings.placeholders = placeholders;
         persistPack();
         renderWorkbench();
         toast('设置已保存');
@@ -952,12 +1033,13 @@
     });
   }
 
-  function openEditItemModal(item) {
+  function openEditItemModal(item: Item | null): void {
+    if (!state.pack) return;
     showModal((close) => {
       const card = pD.createElement('div');
       card.className = 'fp-modal-card';
 
-      const cats = state.pack.categories.sort((a, b) => a.order - b.order);
+      const cats = state.pack!.categories.sort((a, b) => a.order - b.order);
 
       card.innerHTML = `
         <div class="fp-modal-title">✏️ 编辑条目</div>
@@ -965,8 +1047,8 @@
         <div class="fp-row"><label>执行内容</label><textarea data-content>${item ? item.content : ''}</textarea></div>
         <div class="fp-row"><label>执行方式</label>
           <select data-mode>
-            <option value="append" ${(item?.mode || state.pack.settings.defaults.mode) === 'append' ? 'selected' : ''}>追加到输入框</option>
-            <option value="inject" ${(item?.mode || state.pack.settings.defaults.mode) === 'inject' ? 'selected' : ''}>注入到上下文</option>
+            <option value="append" ${(item?.mode || state.pack!.settings.defaults.mode) === 'append' ? 'selected' : ''}>追加到输入框</option>
+            <option value="inject" ${(item?.mode || state.pack!.settings.defaults.mode) === 'inject' ? 'selected' : ''}>注入到上下文</option>
           </select>
         </div>
         <div class="fp-row"><label>所属分类</label>
@@ -975,7 +1057,7 @@
         <div class="fp-row"><label>变量快捷</label>
           <select data-ins>
             <option value="">选择并插入...</option>
-            ${Object.keys(state.pack.settings.placeholders).map((k) => `<option value="{@${k}:${state.pack.settings.placeholders[k]}}">{@${k}}</option>`).join('')}
+            ${Object.keys(state.pack!.settings.placeholders).map((k) => `<option value="{@${k}:${state.pack!.settings.placeholders[k]}}">{@${k}}</option>`).join('')}
           </select>
         </div>
         <div class="fp-actions">
@@ -985,18 +1067,18 @@
         </div>
       `;
 
-      const contentEl = card.querySelector('[data-content]');
-      card.querySelector('[data-ins]').onchange = (e) => {
-        const v = e.target.value;
+      const contentEl = card.querySelector('[data-content]') as HTMLTextAreaElement | null;
+      (card.querySelector('[data-ins]') as HTMLSelectElement | null)!.onchange = (e) => {
+        const v = (e.target as HTMLSelectElement).value;
         if (!v) return;
-        contentEl.value += v;
-        e.target.value = '';
+        if (contentEl) contentEl.value += v;
+        (e.target as HTMLSelectElement).value = '';
       };
 
       if (item) {
-        card.querySelector('[data-del]').onclick = () => {
+        (card.querySelector('[data-del]') as HTMLElement | null)!.onclick = () => {
           if (!confirm('确认删除该条目？')) return;
-          state.pack.items = state.pack.items.filter((i) => i.id !== item.id);
+          state.pack!.items = state.pack!.items.filter((i) => i.id !== item.id);
           persistPack();
           renderWorkbench();
           toast('条目已删除');
@@ -1004,12 +1086,12 @@
         };
       }
 
-      card.querySelector('[data-close]').onclick = close;
-      card.querySelector('[data-save]').onclick = () => {
-        const name = card.querySelector('[data-name]').value.trim();
-        const content = card.querySelector('[data-content]').value.trim();
-        const mode = card.querySelector('[data-mode]').value === 'inject' ? 'inject' : 'append';
-        const categoryId = card.querySelector('[data-cat]').value;
+      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = close;
+      (card.querySelector('[data-save]') as HTMLElement | null)!.onclick = () => {
+        const name = (card.querySelector('[data-name]') as HTMLInputElement | null)?.value.trim();
+        const content = (card.querySelector('[data-content]') as HTMLTextAreaElement | null)?.value.trim();
+        const mode = (card.querySelector('[data-mode]') as HTMLSelectElement | null)?.value === 'inject' ? 'inject' : 'append';
+        const categoryId = (card.querySelector('[data-cat]') as HTMLSelectElement | null)?.value;
         if (!name || !content) {
           toast('名称和执行内容不能为空');
           return;
@@ -1018,16 +1100,16 @@
           item.name = name;
           item.content = content;
           item.mode = mode;
-          item.categoryId = categoryId;
+          item.categoryId = categoryId || null;
         } else {
-          state.pack.items.push({
+          state.pack!.items.push({
             id: uid('item'),
-            categoryId,
+            categoryId: categoryId || null,
             name,
             content,
             mode,
             favorite: false,
-            order: getItemsByCategory(categoryId, false).length,
+            order: getItemsByCategory(categoryId || null, false).length,
           });
         }
         persistPack();
@@ -1040,24 +1122,24 @@
     });
   }
 
-  function buildFilteredIncomingBySelection(incoming, selectedCategoryIds, selectedItemIds) {
-    const catById = new Map(incoming.categories.map((c) => [c.id, c]));
-    const includeCatIds = new Set(selectedCategoryIds || []);
-    const includeItemIds = new Set(selectedItemIds || []);
+  function buildFilteredIncomingBySelection(incoming: Pack, selectedCategoryIds: string[], selectedItemIds: string[]): Pack {
+    const catById = new Map<string, Category>(incoming.categories.map((c) => [c.id, c]));
+    const includeCatIds = new Set<string>(selectedCategoryIds || []);
+    const includeItemIds = new Set<string>(selectedItemIds || []);
 
-    function includeAncestors(catId) {
+    function includeAncestors(catId: string): void {
       let cur = catById.get(catId);
-      const guard = new Set();
+      const guard = new Set<string>();
       while (cur && !guard.has(cur.id)) {
         guard.add(cur.id);
         includeCatIds.add(cur.id);
-        cur = cur.parentId ? catById.get(cur.parentId) : null;
+        cur = cur.parentId ? catById.get(cur.parentId) : undefined;
       }
     }
 
     for (const item of incoming.items) {
       if (includeItemIds.has(item.id)) {
-        includeAncestors(item.categoryId);
+        includeAncestors(item.categoryId || '');
       }
     }
     for (const catId of [...includeCatIds]) includeAncestors(catId);
@@ -1068,25 +1150,25 @@
       uiState: deepClone(incoming.uiState),
       favorites: deepClone(incoming.favorites || []),
       categories: incoming.categories.filter((c) => includeCatIds.has(c.id)),
-      items: incoming.items.filter((i) => includeItemIds.has(i.id) && includeCatIds.has(i.categoryId)),
+      items: incoming.items.filter((i) => includeItemIds.has(i.id) && includeCatIds.has(i.categoryId || '')),
     });
   }
 
-  function openImportSelectionModal(incoming, onDone) {
+  function openImportSelectionModal(incoming: Pack, onDone: (selected: Pack | null) => void): void {
     showModal((closeSelect) => {
       const card = pD.createElement('div');
       card.className = 'fp-modal-card';
 
-      const pathMap = new Map();
-      const catById = new Map(incoming.categories.map((c) => [c.id, c]));
+      const pathMap = new Map<string, string>();
+      const catById = new Map<string, Category>(incoming.categories.map((c) => [c.id, c]));
       for (const cat of incoming.categories) {
-        const names = [];
-        let cur = cat;
-        const guard = new Set();
+        const names: string[] = [];
+        let cur: Category | undefined = cat;
+        const guard = new Set<string>();
         while (cur && !guard.has(cur.id)) {
           guard.add(cur.id);
           names.unshift(cur.name);
-          cur = cur.parentId ? catById.get(cur.parentId) : null;
+          cur = cur.parentId ? catById.get(cur.parentId) : undefined;
         }
         pathMap.set(cat.id, names.join(' / '));
       }
@@ -1115,14 +1197,14 @@
         </div>
       `;
 
-      const catsWrap = card.querySelector('[data-cats]');
-      const itemsWrap = card.querySelector('[data-items]');
-      const filterInput = card.querySelector('[data-filter]');
+      const catsWrap = card.querySelector('[data-cats]') as HTMLElement | null;
+      const itemsWrap = card.querySelector('[data-items]') as HTMLElement | null;
+      const filterInput = card.querySelector('[data-filter]') as HTMLInputElement | null;
 
-      const renderLists = () => {
-        const kw = (filterInput.value || '').trim().toLowerCase();
-        catsWrap.innerHTML = '';
-        itemsWrap.innerHTML = '';
+      const renderLists = (): void => {
+        const kw = (filterInput?.value || '').trim().toLowerCase();
+        if (catsWrap) catsWrap.innerHTML = '';
+        if (itemsWrap) itemsWrap.innerHTML = '';
 
         for (const cat of incoming.categories) {
           const p = pathMap.get(cat.id) || cat.name;
@@ -1130,36 +1212,36 @@
           const row = pD.createElement('label');
           row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:6px;border-radius:8px';
           row.innerHTML = `<input type="checkbox" data-cat-id="${cat.id}" checked /><span style="font-size:12px;line-height:1.35">${p}</span>`;
-          catsWrap.appendChild(row);
+          catsWrap?.appendChild(row);
         }
 
         for (const item of incoming.items) {
-          const full = `${pathMap.get(item.categoryId) || ''} / ${item.name}`;
+          const full = `${pathMap.get(item.categoryId || '') || ''} / ${item.name}`;
           if (kw && !full.toLowerCase().includes(kw) && !(item.content || '').toLowerCase().includes(kw)) continue;
           const row = pD.createElement('label');
           row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:6px;border-radius:8px';
-          row.innerHTML = `<input type="checkbox" data-item-id="${item.id}" checked /><span style="font-size:12px;line-height:1.35"><b>${item.name}</b><br/><span style="opacity:.7">${pathMap.get(item.categoryId) || ''}</span></span>`;
-          itemsWrap.appendChild(row);
+          row.innerHTML = `<input type="checkbox" data-item-id="${item.id}" checked /><span style="font-size:12px;line-height:1.35"><b>${item.name}</b><br/><span style="opacity:.7">${pathMap.get(item.categoryId || '') || ''}</span></span>`;
+          itemsWrap?.appendChild(row);
         }
       };
       renderLists();
 
-      filterInput.oninput = renderLists;
-      card.querySelector('[data-all]').onclick = () => {
-        card.querySelectorAll('input[type="checkbox"]').forEach((el) => { el.checked = true; });
+      filterInput!.oninput = renderLists;
+      (card.querySelector('[data-all]') as HTMLElement | null)!.onclick = () => {
+        card.querySelectorAll('input[type="checkbox"]').forEach((el) => { (el as HTMLInputElement).checked = true; });
       };
-      card.querySelector('[data-none]').onclick = () => {
-        card.querySelectorAll('input[type="checkbox"]').forEach((el) => { el.checked = false; });
+      (card.querySelector('[data-none]') as HTMLElement | null)!.onclick = () => {
+        card.querySelectorAll('input[type="checkbox"]').forEach((el) => { (el as HTMLInputElement).checked = false; });
       };
 
-      card.querySelector('[data-close]').onclick = () => {
+      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = () => {
         closeSelect();
         onDone(null);
       };
 
-      card.querySelector('[data-next]').onclick = () => {
-        const selectedCategoryIds = [...card.querySelectorAll('input[data-cat-id]:checked')].map((el) => el.getAttribute('data-cat-id'));
-        const selectedItemIds = [...card.querySelectorAll('input[data-item-id]:checked')].map((el) => el.getAttribute('data-item-id'));
+      (card.querySelector('[data-next]') as HTMLElement | null)!.onclick = () => {
+        const selectedCategoryIds = [...card.querySelectorAll('input[data-cat-id]:checked')].map((el) => el.getAttribute('data-cat-id') || '');
+        const selectedItemIds = [...card.querySelectorAll('input[data-item-id]:checked')].map((el) => el.getAttribute('data-item-id') || '');
         const filtered = buildFilteredIncomingBySelection(incoming, selectedCategoryIds, selectedItemIds);
         if (!filtered.categories.length && !filtered.items.length) {
           toast('请至少勾选一个分类或条目');
@@ -1173,30 +1255,40 @@
     });
   }
 
-  function isLegacyQrJson(data) {
-    return !!(data && typeof data === 'object' && Array.isArray(data.qrList));
+  function isLegacyQrJson(data: unknown): data is { qrList: unknown[] } & Record<string, unknown> {
+    return !!(data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).qrList));
   }
 
-  function sanitizeLegacyText(text) {
+  function sanitizeLegacyText(text: string): string {
     return String(text || '').replace(/\{\{input\}\}|\{input\}/g, '').trim();
   }
 
-  function containsBlockedContent(text) {
+  function containsBlockedContent(text: string): boolean {
     const blocked = ['未成年', '幼女', '幼男', '正太', '萝莉', '小男孩', '小女孩', '儿童'];
     const raw = String(text || '');
     return blocked.some((kw) => raw.includes(kw));
   }
 
-  function convertLegacyQrToPack(legacy) {
+  interface LegacyQrItem {
+    label?: string;
+    message?: string;
+  }
+
+  interface LegacyQr {
+    name?: string;
+    qrList?: LegacyQrItem[];
+  }
+
+  function convertLegacyQrToPack(legacy: LegacyQr): { pack: Pack; skippedUnsafe: number } {
     const rootId = uid('cat');
     const rootName = String(legacy.name || 'QR导入').trim() || 'QR导入';
-    const categories = [{ id: rootId, name: rootName, parentId: null, order: 0, collapsed: false }];
-    const items = [];
-
-    const labelToCatId = new Map();
-    const childParentMap = new Map();
+    const categories: Category[] = [{ id: rootId, name: rootName, parentId: null, order: 0, collapsed: false }];
+    const items: Item[] = [];
+    
+    const labelToCatId = new Map<string, string>();
+    const childParentMap = new Map<string, string>();
     const list = Array.isArray(legacy.qrList) ? legacy.qrList : [];
-
+    
     list.forEach((q, idx) => {
       const label = String(q?.label || `菜单${idx + 1}`).trim();
       if (!labelToCatId.has(label)) {
@@ -1211,34 +1303,34 @@
         });
       }
     });
-
+    
     let skippedUnsafe = 0;
     for (const q of list) {
       const curLabel = String(q?.label || '').trim();
       const curCatId = labelToCatId.get(curLabel);
       if (!curCatId) continue;
       const msg = String(q?.message || '');
-      const ruleRegex = /right=\"([^\"]+)\"\s*\{\:\s*([\s\S]*?)\s*:\}/g;
-      let m;
-      let localOrder = items.filter((it) => it.categoryId === curCatId).length;
-
+      const ruleRegex = /right="([^"]+)"\s*\{\:\s*([\s\S]*?)\s*:\}/g;
+      let m: RegExpExecArray | null;
+      let localOrder: number = items.filter((it) => it.categoryId === curCatId).length;
+    
       while ((m = ruleRegex.exec(msg)) !== null) {
         const choice = String(m[1] || '').trim();
         const action = String(m[2] || '').trim();
         if (!choice || ['⬅️返回', '✨然后', '⚡同时', '--------'].includes(choice)) continue;
-
+    
         const runMatch = action.match(/\/run\s+([^\n|:}]+)/);
         const setInputMatch = action.match(/\/setinput[\s\S]*?<([\s\S]*?)>/);
         const injectMatch = action.match(/\/inject(?:\s+[^\n]*)?\s+\"?([\s\S]*?)\"?(?:\s*\|\||$)/);
-
+    
         if (runMatch) {
           const targetLabel = String(runMatch[1] || '').trim();
           if (labelToCatId.has(targetLabel) && targetLabel !== curLabel && !childParentMap.has(targetLabel)) {
             childParentMap.set(targetLabel, curLabel);
           }
         }
-
-        let mode = null;
+    
+        let mode: 'append' | 'inject' | null = null;
         let content = '';
         if (setInputMatch) {
           mode = 'append';
@@ -1247,13 +1339,13 @@
           mode = 'inject';
           content = sanitizeLegacyText(injectMatch[1]);
         }
-
+    
         if (!mode || !content) continue;
         if (containsBlockedContent(`${choice}\n${content}`)) {
           skippedUnsafe += 1;
           continue;
         }
-
+    
         const duplicateCount = items.filter((it) => it.categoryId === curCatId && it.name === choice).length;
         items.push({
           id: uid('item'),
@@ -1266,15 +1358,15 @@
         });
       }
     }
-
+    
     for (const [childLabel, parentLabel] of childParentMap.entries()) {
       const childId = labelToCatId.get(childLabel);
       const parentId = labelToCatId.get(parentLabel);
       const child = categories.find((c) => c.id === childId);
       if (child && parentId && child.id !== parentId) child.parentId = parentId;
     }
-
-    const byParent = new Map();
+    
+    const byParent = new Map<string | null, Category[]>();
     for (const c of categories) {
       const key = c.parentId || 'root';
       const arr = byParent.get(key) || [];
@@ -1318,12 +1410,12 @@
         </div>
       `;
 
-      const fileInput = card.querySelector('[data-file]');
+      const fileInput = card.querySelector('[data-file]') as HTMLInputElement | null;
       let loadedFileText = '';
       let loadedFileName = '';
 
-      fileInput.onchange = async () => {
-        const file = fileInput.files && fileInput.files[0];
+      fileInput!.onchange = async () => {
+        const file = fileInput?.files && fileInput.files[0];
         if (!file) return;
         try {
           loadedFileText = await file.text();
@@ -1336,13 +1428,13 @@
         }
       };
 
-      card.querySelector('[data-close]').onclick = close;
-      card.querySelector('[data-parse]').onclick = async () => {
-        let parsed;
+      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = close;
+      (card.querySelector('[data-parse]') as HTMLElement | null)!.onclick = async () => {
+        let parsed: unknown;
         try {
           let raw = loadedFileText;
           if (!raw.trim()) {
-            const file = fileInput.files && fileInput.files[0];
+            const file = fileInput?.files && fileInput.files[0];
             if (file) {
               raw = await file.text();
               loadedFileText = raw;
@@ -1363,9 +1455,9 @@
           return;
         }
 
-        let incoming;
+        let incoming: Pack;
         if (isLegacyQrJson(parsed)) {
-          const converted = convertLegacyQrToPack(parsed);
+          const converted = convertLegacyQrToPack(parsed as LegacyQr);
           incoming = converted.pack;
           if (converted.skippedUnsafe > 0) {
             toast(`已自动过滤 ${converted.skippedUnsafe} 条不兼容条目`);
@@ -1378,25 +1470,34 @@
 
         openImportSelectionModal(incoming, (selectedIncoming) => {
           if (!selectedIncoming) return;
+          if (!state.pack) return;
 
-          const conflicts = [];
-          const catByParentAndName = new Map();
+          interface ConflictItem {
+            type: 'category' | 'item';
+            incoming: Category | Item;
+            existing: Category | Item;
+            action: 'skip' | 'overwrite' | 'rename';
+            rename: string;
+          }
+
+          const conflicts: ConflictItem[] = [];
+          const catByParentAndName = new Map<string, Category | Item>();
           for (const c of state.pack.categories) {
             catByParentAndName.set(`${c.parentId || 'root'}::${c.name}`, c);
           }
-          const itemByCatAndName = new Map();
+          const itemByCatAndName = new Map<string, Category | Item>();
           for (const i of state.pack.items) {
             itemByCatAndName.set(`${i.categoryId}::${i.name}`, i);
           }
 
           for (const cat of selectedIncoming.categories) {
             const key = `${cat.parentId || 'root'}::${cat.name}`;
-            const hit = catByParentAndName.get(key);
+            const hit = catByParentAndName.get(key) as Category | undefined;
             if (hit) conflicts.push({ type: 'category', incoming: cat, existing: hit, action: 'skip', rename: '' });
           }
           for (const item of selectedIncoming.items) {
             const key = `${item.categoryId}::${item.name}`;
-            const hit = itemByCatAndName.get(key);
+            const hit = itemByCatAndName.get(key) as Item | undefined;
             if (hit) conflicts.push({ type: 'item', incoming: item, existing: hit, action: 'skip', rename: '' });
           }
 
@@ -1419,7 +1520,7 @@
               </div>
             `;
 
-            const list = c2.querySelector('[data-list]');
+            const list = c2.querySelector('[data-list]') as HTMLElement | null;
             conflicts.forEach((c, idx) => {
               const row = pD.createElement('div');
               row.style.cssText = 'padding:8px;border:1px solid rgba(174,199,190,.2);border-radius:10px;margin-bottom:8px';
@@ -1434,14 +1535,14 @@
                 </div>
                 <div class="fp-row"><label>新名称</label><input data-rename="${idx}" placeholder="仅在重命名时使用" /></div>
               `;
-              list.appendChild(row);
+              list?.appendChild(row);
             });
 
-            c2.querySelector('[data-close]').onclick = closeConflict;
-            c2.querySelector('[data-apply]').onclick = () => {
+            (c2.querySelector('[data-close]') as HTMLElement | null)!.onclick = closeConflict;
+            (c2.querySelector('[data-apply]') as HTMLElement | null)!.onclick = () => {
               conflicts.forEach((c, idx) => {
-                c.action = c2.querySelector(`[data-action="${idx}"]`).value;
-                c.rename = c2.querySelector(`[data-rename="${idx}"]`).value.trim();
+                c.action = (c2.querySelector(`[data-action="${idx}"]`) as HTMLSelectElement | null)?.value as ConflictItem['action'] || 'skip';
+                c.rename = (c2.querySelector(`[data-rename="${idx}"]`) as HTMLInputElement | null)?.value.trim() || '';
               });
               applyImport(selectedIncoming, conflicts);
               closeConflict();
@@ -1457,16 +1558,25 @@
     });
   }
 
-  function applyImport(incoming, conflicts) {
+  interface ImportConflict {
+    type: 'category' | 'item';
+    incoming: Category | Item;
+    existing: Category | Item;
+    action: 'skip' | 'overwrite' | 'rename';
+    rename: string;
+  }
+
+  function applyImport(incoming: Pack, conflicts: ImportConflict[]): void {
+    if (!state.pack) return;
     const next = deepClone(state.pack);
 
-    const conflictMap = new Map();
+    const conflictMap = new Map<string, ImportConflict>();
     for (const c of conflicts) {
       const key = `${c.type}::${c.incoming.id}`;
       conflictMap.set(key, c);
     }
 
-    const catIdMap = new Map();
+    const catIdMap = new Map<string, string>();
     for (const c of incoming.categories) {
       const cf = conflictMap.get(`category::${c.id}`);
       if (!cf) {
@@ -1482,8 +1592,8 @@
         continue;
       }
       if (cf.action === 'overwrite') {
-        cf.existing.name = c.name;
-        cf.existing.collapsed = c.collapsed;
+        (cf.existing as Category).name = c.name;
+        (cf.existing as Category).collapsed = c.collapsed;
         catIdMap.set(c.id, cf.existing.id);
         continue;
       }
@@ -1496,27 +1606,27 @@
     }
 
     for (const it of incoming.items) {
-      const mappedCat = catIdMap.get(it.categoryId) || it.categoryId;
+      const mappedCat = catIdMap.get(it.categoryId || '') || it.categoryId;
       const cf = conflictMap.get(`item::${it.id}`);
       if (!cf) {
         const copy = deepClone(it);
         copy.id = next.items.find((x) => x.id === copy.id) ? uid('item') : copy.id;
-        copy.categoryId = mappedCat;
+        copy.categoryId = mappedCat || null;
         next.items.push(copy);
         continue;
       }
       if (cf.action === 'skip') continue;
       if (cf.action === 'overwrite') {
-        cf.existing.content = it.content;
-        cf.existing.mode = it.mode;
-        cf.existing.favorite = it.favorite;
-        cf.existing.categoryId = mappedCat;
+        (cf.existing as Item).content = it.content;
+        (cf.existing as Item).mode = it.mode;
+        (cf.existing as Item).favorite = it.favorite;
+        (cf.existing as Item).categoryId = mappedCat || null;
         continue;
       }
       const renamed = deepClone(it);
       renamed.id = uid('item');
       renamed.name = cf.rename || `${it.name}_导入`;
-      renamed.categoryId = mappedCat;
+      renamed.categoryId = mappedCat || null;
       next.items.push(renamed);
     }
 
@@ -1526,11 +1636,12 @@
     toast('导入完成');
   }
 
-  function collectSubtreeIds(rootId) {
-    const ids = new Set([rootId]);
+  function collectSubtreeIds(rootId: string): Set<string> {
+    const ids = new Set<string>([rootId]);
     let changed = true;
     while (changed) {
       changed = false;
+      if (!state.pack) break;
       for (const c of state.pack.categories) {
         if (c.parentId && ids.has(c.parentId) && !ids.has(c.id)) {
           ids.add(c.id);
@@ -1541,7 +1652,8 @@
     return ids;
   }
 
-  function openExportModal() {
+  function openExportModal(): void {
+    if (!state.pack) return;
     const fallbackId = state.pack.categories.find((c) => c.parentId === null)?.id;
     const rootId = state.currentCategoryId && state.currentCategoryId !== '__favorites__' ? state.currentCategoryId : fallbackId;
     if (!rootId) {
@@ -1557,10 +1669,10 @@
         name: `导出_${getCategoryById(rootId)?.name || '分类子树'}`,
       },
       categories: state.pack.categories.filter((c) => ids.has(c.id)),
-      items: state.pack.items.filter((i) => ids.has(i.categoryId)),
+      items: state.pack.items.filter((i) => ids.has(i.categoryId || '')),
       settings: deepClone(state.pack.settings),
       uiState: deepClone(state.pack.uiState),
-      favorites: state.pack.favorites.filter((id) => state.pack.items.find((x) => x.id === id && ids.has(x.categoryId))),
+      favorites: state.pack.favorites.filter((id) => state.pack!.items.find((x) => x.id === id && ids.has(x.categoryId || ''))),
     });
 
     const text = JSON.stringify(payload, null, 2);
@@ -1576,24 +1688,24 @@
           <button data-close>关闭</button>
         </div>
       `;
-      const ta = card.querySelector('[data-json]');
-      ta.value = text;
-      card.querySelector('[data-download]').onclick = () => {
-        const blob = new Blob([ta.value], { type: 'application/json;charset=utf-8' });
+      const ta = card.querySelector('[data-json]') as HTMLTextAreaElement | null;
+      if (ta) ta.value = text;
+      (card.querySelector('[data-download]') as HTMLElement | null)!.onclick = () => {
+        const blob = new Blob([ta?.value || text], { type: 'application/json;charset=utf-8' });
         const a = pD.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = `快速情节编排_导出_${Date.now()}.json`;
         a.click();
         URL.revokeObjectURL(a.href);
       };
-      card.querySelector('[data-close]').onclick = close;
+      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = close;
       return card;
     });
   }
 
-  function renderPreview(previewEl) {
+  function renderPreview(previewEl: HTMLElement): void {
     previewEl.innerHTML = '';
-    const tokens = state.pack.uiState.preview.tokens || [];
+    const tokens = state.pack?.uiState?.preview?.tokens || [];
     for (const t of tokens) {
       const chip = pD.createElement('span');
       chip.className = `fp-token ${t.type || 'raw'}`;
@@ -1602,7 +1714,7 @@
     }
   }
 
-  function openContextMenu(x, y, item) {
+  function openContextMenu(x: number, y: number, item: Item): void {
     closeContextMenu();
     const menu = pD.createElement('div');
     menu.className = 'fp-menu';
@@ -1616,9 +1728,9 @@
       <button class="fp-menu-btn" data-act="delete">删除</button>
     `;
     menu.onclick = async (e) => {
-      const btn = e.target.closest('[data-act]');
+      const btn = (e.target as HTMLElement).closest('[data-act]');
       if (!btn) return;
-      const act = btn.dataset.act;
+      const act = btn.getAttribute('data-act');
       if (act === 'edit') openEditItemModal(item);
       if (act === 'favorite') {
         item.favorite = !item.favorite;
@@ -1635,10 +1747,12 @@
       }
       if (act === 'delete') {
         if (confirm(`确认删除条目「${item.name}」吗？`)) {
-          state.pack.items = state.pack.items.filter((i) => i.id !== item.id);
-          persistPack();
-          renderWorkbench();
-          toast('条目已删除');
+          if (state.pack) {
+            state.pack.items = state.pack.items.filter((i) => i.id !== item.id);
+            persistPack();
+            renderWorkbench();
+            toast('条目已删除');
+          }
         }
       }
       if (act === 'move') {
@@ -1648,13 +1762,13 @@
           card.innerHTML = `
             <div class="fp-modal-title">移动条目：${item.name}</div>
             <div class="fp-row"><label>目标分类</label>
-              <select data-target>${state.pack.categories.map((c) => `<option value="${c.id}" ${c.id === item.categoryId ? 'selected' : ''}>${c.name}</option>`).join('')}</select>
+              <select data-target>${state.pack?.categories.map((c) => `<option value="${c.id}" ${c.id === item.categoryId ? 'selected' : ''}>${c.name}</option>`).join('') || ''}</select>
             </div>
             <div class="fp-actions"><button data-close>取消</button><button class="primary" data-ok>移动</button></div>
           `;
-          card.querySelector('[data-close]').onclick = close;
-          card.querySelector('[data-ok]').onclick = () => {
-            moveItemToCategory(item.id, card.querySelector('[data-target]').value);
+          (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = close;
+          (card.querySelector('[data-ok]') as HTMLElement | null)!.onclick = () => {
+            moveItemToCategory(item.id, (card.querySelector('[data-target]') as HTMLSelectElement | null)?.value || '');
             renderWorkbench();
             toast('条目已移动');
             close();
@@ -1674,7 +1788,7 @@
     if (rect.bottom > vp.height - 6) menu.style.top = `${vp.height - rect.height - 8}px`;
   }
 
-  function renderMain(mainScroll) {
+  function renderMain(mainScroll: HTMLElement): void {
     mainScroll.innerHTML = '';
     const groups = groupedItemsForMain();
 
@@ -1728,7 +1842,7 @@
 
         card.addEventListener('dragstart', (e) => {
           state.dragData = { type: 'item', id: item.id };
-          e.dataTransfer.effectAllowed = 'move';
+          if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
         });
 
         grid.appendChild(card);
@@ -1738,7 +1852,7 @@
     }
   }
 
-  function enableResizers(panel, sidebar, splitV, bottom, splitH) {
+  function enableResizers(panel: HTMLElement, sidebar: HTMLElement, splitV: HTMLElement, bottom: HTMLElement, splitH: HTMLElement): void {
     const minSide = 220;
     const maxSide = 520;
 
@@ -1746,15 +1860,17 @@
       e.preventDefault();
       const startX = e.clientX;
       const startW = sidebar.getBoundingClientRect().width;
-      const move = (ev) => {
+      const move = (ev: MouseEvent) => {
         const next = Math.min(maxSide, Math.max(minSide, startW + (ev.clientX - startX)));
         sidebar.style.width = `${next}px`;
       };
       const up = () => {
         pD.removeEventListener('mousemove', move);
         pD.removeEventListener('mouseup', up);
-        state.pack.uiState.sidebar.width = Math.round(sidebar.getBoundingClientRect().width);
-        persistPack();
+        if (state.pack) {
+          state.pack.uiState.sidebar.width = Math.round(sidebar.getBoundingClientRect().width);
+          persistPack();
+        }
       };
       pD.addEventListener('mousemove', move);
       pD.addEventListener('mouseup', up);
@@ -1765,15 +1881,17 @@
       const startY = e.clientY;
       const startH = bottom.getBoundingClientRect().height;
       const panelH = panel.getBoundingClientRect().height;
-      const move = (ev) => {
+      const move = (ev: MouseEvent) => {
         const next = Math.min(panelH * 0.55, Math.max(90, startH - (ev.clientY - startY)));
         bottom.style.height = `${next}px`;
       };
       const up = () => {
         pD.removeEventListener('mousemove', move);
         pD.removeEventListener('mouseup', up);
-        state.pack.uiState.preview.height = Math.round(bottom.getBoundingClientRect().height);
-        persistPack();
+        if (state.pack) {
+          state.pack.uiState.preview.height = Math.round(bottom.getBoundingClientRect().height);
+          persistPack();
+        }
       };
       pD.addEventListener('mousemove', move);
       pD.addEventListener('mouseup', up);
@@ -1784,7 +1902,8 @@
     const overlay = pD.getElementById(OVERLAY_ID);
     if (!overlay) return;
 
-    const panel = overlay.querySelector('.fp-panel');
+    const panel = overlay.querySelector('.fp-panel') as HTMLElement | null;
+    if (!panel || !state.pack) return;
     panel.innerHTML = '';
     panel.setAttribute('data-theme', (state.pack.settings.ui && state.pack.settings.ui.theme) || 'herdi-light');
 
@@ -1913,16 +2032,18 @@
     renderPreview(preview);
     enableResizers(panel, sidebar, splitV, bottom, splitH);
 
-    const searchInput = sideHead.querySelector('input');
-    searchInput.value = state.filter;
-    searchInput.oninput = () => {
-      state.filter = searchInput.value;
-      renderWorkbench();
-    };
+    const searchInput = sideHead.querySelector('input') as HTMLInputElement | null;
+    if (searchInput) {
+      searchInput.value = state.filter;
+      searchInput.oninput = () => {
+        state.filter = searchInput.value;
+        renderWorkbench();
+      };
+    }
 
-    top.querySelector('[data-back]').onclick = () => {
+    (top.querySelector('[data-back]') as HTMLElement | null)!.onclick = () => {
       if (state.currentCategoryId === '__favorites__') {
-        const firstRoot = state.pack.categories
+        const firstRoot = state.pack?.categories
           .filter((c) => c.parentId === null)
           .sort((a, b) => a.order - b.order)[0];
         if (firstRoot) {
@@ -1937,20 +2058,21 @@
         renderWorkbench();
       }
     };
-    top.querySelector('[data-then]').onclick = () => addConnector('then');
-    top.querySelector('[data-simul]').onclick = () => addConnector('simultaneous');
-    top.querySelector('[data-settings]').onclick = openSettingsModal;
-    top.querySelector('[data-import]').onclick = openImportModal;
-    top.querySelector('[data-export]').onclick = openExportModal;
-    top.querySelector('[data-close]').onclick = closeWorkbench;
+    (top.querySelector('[data-then]') as HTMLElement | null)!.onclick = () => addConnector('then');
+    (top.querySelector('[data-simul]') as HTMLElement | null)!.onclick = () => addConnector('simultaneous');
+    (top.querySelector('[data-settings]') as HTMLElement | null)!.onclick = openSettingsModal;
+    (top.querySelector('[data-import]') as HTMLElement | null)!.onclick = openImportModal;
+    (top.querySelector('[data-export]') as HTMLElement | null)!.onclick = openExportModal;
+    (top.querySelector('[data-close]') as HTMLElement | null)!.onclick = closeWorkbench;
 
-    top.querySelector('[data-new-item]').onclick = () => openEditItemModal(null);
-    top.querySelector('[data-new-cat]').onclick = () => {
+    (top.querySelector('[data-new-item]') as HTMLElement | null)!.onclick = () => openEditItemModal(null);
+    (top.querySelector('[data-new-cat]') as HTMLElement | null)!.onclick = () => {
       const name = prompt('新分类名称');
       if (!name) return;
       const parent = state.currentCategoryId === '__favorites__'
-        ? state.pack.categories.find((c) => c.parentId === null)?.id || null
+        ? state.pack?.categories.find((c) => c.parentId === null)?.id || null
         : state.currentCategoryId;
+      if (!state.pack) return;
       state.pack.categories.push({
         id: uid('cat'),
         name: name.trim(),
@@ -1963,13 +2085,16 @@
       toast('分类已创建');
     };
 
-    const toggleBtn = bottomHead.querySelector('[data-toggle-preview]');
-    toggleBtn.textContent = previewExpanded ? '收起' : '展开';
-    toggleBtn.onclick = () => {
-      state.pack.uiState.preview.expanded = !(state.pack.uiState.preview.expanded !== false);
-      persistPack();
-      renderWorkbench();
-    };
+    const toggleBtn = bottomHead.querySelector('[data-toggle-preview]') as HTMLElement | null;
+    if (toggleBtn) {
+      toggleBtn.textContent = previewExpanded ? '收起' : '展开';
+      toggleBtn.onclick = () => {
+        if (!state.pack) return;
+        state.pack.uiState.preview.expanded = !(state.pack.uiState.preview.expanded !== false);
+        persistPack();
+        renderWorkbench();
+      };
+    }
   }
 
   function closeWorkbench() {
@@ -2040,7 +2165,7 @@
     }
 
     pD.addEventListener('click', (e) => {
-      if (state.contextMenu && !e.target.closest('.fp-menu')) closeContextMenu();
+      if (state.contextMenu && !(e.target as HTMLElement).closest('.fp-menu')) closeContextMenu();
     });
 
     console.log('[快速情节编排] 已加载');
