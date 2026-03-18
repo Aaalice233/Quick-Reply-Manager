@@ -1,7 +1,7 @@
 {
     "id": "fast-plot-dev",
     "name": "💌快速情节编排(开发版)",
-    "content": "import 'http://localhost:5500/dist/快速情节编排/index.js'",
+    "content": "import 'http://127.0.0.1:5500/dist/快速情节编排/index.js'",
     "info": "实时开发版本，修改源码后自动更新",
     "buttons": []
 }
