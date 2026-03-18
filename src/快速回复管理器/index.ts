@@ -1,13 +1,23 @@
 (() => {
   'use strict';
 
-  const SCRIPT_LABEL = '💌快速情节编排';
-  const BUTTON_LABEL = '💌快速情节编排';
+  const SCRIPT_LABEL = '💌快速回复管理器';
+  const BUTTON_LABEL = '💌快速回复管理器';
   const STORE_KEY = 'fastPlotQRPack';
   const STYLE_ID = 'fast-plot-workbench-style-v1';
   const OVERLAY_ID = 'fast-plot-workbench-overlay';
   const TOAST_CONTAINER_ID = 'fast-plot-toast-container';
   const DATA_VERSION = 1;
+
+  const THEME_NAMES: Record<string, string> = {
+    'herdi-light': '晨光白',
+    'ink-noir': '墨夜黑',
+    'sand-gold': '沙金暖',
+    'rose-pink': '樱粉柔',
+    'forest-green': '翡翠绿',
+    'ocean-blue': '深海蓝',
+    'purple-mist': '薰衣紫',
+  };
 
   interface PackMeta {
     version: number;
@@ -35,12 +45,20 @@
     order: number;
   }
 
+  interface ConnectorButton {
+    id: string;
+    label: string;
+    token: string;
+    color: string; // 'orange'|'purple'|'green'|'blue'|'red'|'cyan' 或自定义hex
+  }
+
   interface Settings {
     placeholders: Record<string, string>;
     tokens: { simultaneous: string; then: string };
+    connectors: ConnectorButton[];
     toast: { maxStack: number; timeout: number };
     defaults: { mode: 'append' | 'inject'; previewExpanded: boolean };
-    ui: { theme: string };
+    ui: { theme: string; customCSS: string };
   }
 
   interface UiState {
@@ -213,7 +231,7 @@
     try {
       pW.localStorage.setItem(`__${STORE_KEY}__`, JSON.stringify(data));
     } catch (e) {
-      console.error('[快速情节编排] 保存失败', e);
+      console.error('[快速回复管理器] 保存失败', e);
     }
   }
 
@@ -225,7 +243,7 @@
     safe.meta!.createdAt = safe.meta!.createdAt || nowIso();
     safe.meta!.updatedAt = nowIso();
     safe.meta!.source = safe.meta!.source || SCRIPT_LABEL;
-    safe.meta!.name = safe.meta!.name || '💌快速情节编排数据';
+    safe.meta!.name = safe.meta!.name || '💌快速回复管理器数据';
 
     safe.categories = Array.isArray(safe.categories) ? safe.categories : [];
     safe.items = Array.isArray(safe.items) ? safe.items : [];
@@ -243,6 +261,12 @@
       simultaneous: '<同时>',
       then: '<然后>',
     };
+    if (!Array.isArray(safe.settings!.connectors) || !safe.settings!.connectors.length) {
+      safe.settings!.connectors = [
+        { id: uid('conn'), label: '然后', token: safe.settings!.tokens?.then || '<然后>', color: 'orange' },
+        { id: uid('conn'), label: '同时', token: safe.settings!.tokens?.simultaneous || '<同时>', color: 'purple' },
+      ];
+    }
     safe.settings!.toast = safe.settings!.toast || {
       maxStack: 4,
       timeout: 1800,
@@ -251,9 +275,8 @@
       mode: 'append',
       previewExpanded: true,
     };
-    safe.settings!.ui = safe.settings!.ui || {
-      theme: 'herdi-light',
-    };
+    safe.settings!.ui = safe.settings!.ui || { theme: 'herdi-light', customCSS: '' };
+    if (!('customCSS' in safe.settings!.ui)) (safe.settings!.ui as any).customCSS = '';
 
     safe.uiState = safe.uiState || {} as UiState;
     safe.uiState!.sidebar = safe.uiState!.sidebar || {
@@ -383,7 +406,7 @@
         version: DATA_VERSION,
         createdAt: nowIso(),
         source: SCRIPT_LABEL,
-        name: '💌快速情节编排数据',
+        name: '💌快速回复管理器数据',
       },
       categories,
       items,
@@ -451,30 +474,46 @@
     style.textContent = `
 #${OVERLAY_ID}{position:fixed;inset:0;width:100vw;height:100vh;z-index:2147483000;display:flex;align-items:flex-start;justify-content:center;background:radial-gradient(1200px 520px at 12% 0%,rgba(255,255,255,.25),transparent 56%),radial-gradient(1000px 560px at 92% 8%,rgba(244,228,204,.34),transparent 54%),rgba(10,10,12,.52);backdrop-filter:blur(7px);overflow:auto;padding:8px;scrollbar-gutter:stable}
 #${OVERLAY_ID} *{box-sizing:border-box}
-.fp-panel{position:relative;display:flex;flex-direction:column;border-radius:20px;overflow:hidden;border:1px solid rgba(27,27,30,.14);background:linear-gradient(180deg,#f9f6f0 0%,#f3eee5 100%);box-shadow:0 28px 70px rgba(0,0,0,.30);color:#1f2023;font-family:'Manrope','Noto Sans SC','Segoe UI',sans-serif;flex-shrink:0;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);margin:8px auto}
+.fp-panel{position:relative;display:flex;flex-direction:column;border-radius:20px;overflow:hidden;border:1px solid rgba(27,27,30,.14);background:linear-gradient(180deg,#f9f6f0 0%,#f3eee5 100%);box-shadow:0 28px 70px rgba(0,0,0,.30);color:#1f2023;font-family:'Manrope','Noto Sans SC','Segoe UI',sans-serif;flex-shrink:0;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);margin:8px auto;transition:background .3s ease,color .3s ease}
 .fp-top{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;padding:10px 12px;border-bottom:1px solid rgba(26,26,30,.10);background:linear-gradient(180deg,#ffffff,#f5f2ea);column-gap:10px}
 .fp-left,.fp-right{display:flex;align-items:center;gap:8px}
 .fp-right{justify-content:flex-end;min-width:0;overflow:auto}
 .fp-left{min-width:0;overflow:auto}
-.fp-btn{border:1px solid rgba(23,24,28,.18);background:rgba(255,255,255,.9);color:#1f2023;border-radius:11px;padding:7px 12px;cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;line-height:1.2}
+.fp-btn{border:1px solid rgba(23,24,28,.18);background:rgba(255,255,255,.9);color:#1f2023;border-radius:11px;padding:7px 12px;cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;line-height:1.2;transition:all .18s ease}
 .fp-btn:hover{background:#fff;border-color:rgba(23,24,28,.34)}
 .fp-btn.primary{background:#1f2023;border-color:#1f2023;color:#fff}
 .fp-btn.icon-only{padding:7px 9px;min-width:34px;display:inline-flex;align-items:center;justify-content:center}
 .fp-btn .fp-ico{width:14px;height:14px;display:inline-block;vertical-align:-2px;margin-right:6px}
 .fp-btn.icon-only .fp-ico{margin-right:0}
-.fp-title{font-weight:800;font-size:14px;letter-spacing:.2px;color:#17181b;white-space:nowrap}
+.fp-title{font-weight:800;font-size:14px;letter-spacing:.2px;color:inherit;white-space:nowrap}
 .fp-quick-actions{display:flex;align-items:center;gap:7px;margin-left:4px}
 .fp-btn-then{background:linear-gradient(180deg,#ffe8cf,#f9dbb8);border-color:rgba(170,112,42,.35);color:#7e4e16}
 .fp-btn-then:hover{background:linear-gradient(180deg,#ffe2c2,#f5d0a6);border-color:rgba(170,112,42,.5)}
 .fp-btn-simul{background:linear-gradient(180deg,#efe9ff,#dfd3ff);border-color:rgba(92,77,155,.35);color:#4b3a8a}
 .fp-btn-simul:hover{background:linear-gradient(180deg,#e8e0ff,#d3c3ff);border-color:rgba(92,77,155,.52)}
-.fp-path{padding:8px 12px;border-bottom:1px solid rgba(26,26,30,.09);background:#f1ebe1;color:#5a5148;font-size:12px;white-space:nowrap;overflow:auto}
+.fp-conn-orange{background:linear-gradient(180deg,#ffe8cf,#f9dbb8);border-color:rgba(170,112,42,.35);color:#7e4e16}
+.fp-conn-orange:hover{background:linear-gradient(180deg,#ffe2c2,#f5d0a6);border-color:rgba(170,112,42,.5)}
+.fp-conn-purple{background:linear-gradient(180deg,#efe9ff,#dfd3ff);border-color:rgba(92,77,155,.35);color:#4b3a8a}
+.fp-conn-purple:hover{background:linear-gradient(180deg,#e8e0ff,#d3c3ff);border-color:rgba(92,77,155,.52)}
+.fp-conn-green{background:linear-gradient(180deg,#e4f5e9,#ceebd6);border-color:rgba(50,130,80,.3);color:#2d6b42}
+.fp-conn-green:hover{background:linear-gradient(180deg,#d8f0df,#c2e5cc);border-color:rgba(50,130,80,.45)}
+.fp-conn-blue{background:linear-gradient(180deg,#e0eeff,#cce0ff);border-color:rgba(50,90,170,.3);color:#2a5090}
+.fp-conn-blue:hover{background:linear-gradient(180deg,#d4e6ff,#c0d8ff);border-color:rgba(50,90,170,.45)}
+.fp-conn-red{background:linear-gradient(180deg,#ffe4e4,#fcd2d2);border-color:rgba(170,50,50,.3);color:#8b3030}
+.fp-conn-red:hover{background:linear-gradient(180deg,#ffd8d8,#f8c4c4);border-color:rgba(170,50,50,.45)}
+.fp-conn-cyan{background:linear-gradient(180deg,#e0f6f6,#cceded);border-color:rgba(40,130,140,.3);color:#1a6e70}
+.fp-conn-cyan:hover{background:linear-gradient(180deg,#d4f0f0,#c0e6e6);border-color:rgba(40,130,140,.45)}
+.fp-path{padding:8px 12px;border-bottom:1px solid rgba(26,26,30,.09);background:#f1ebe1;color:#5a5148;font-size:12px;white-space:nowrap;overflow:auto;display:flex;align-items:center;gap:0}
+.fp-path-sep{color:rgba(90,81,72,.4);margin:0 2px;flex-shrink:0}
+.fp-path-link{cursor:pointer;padding:2px 6px;border-radius:6px;transition:background .15s ease,color .15s ease;white-space:nowrap;flex-shrink:0}
+.fp-path-link:hover{background:rgba(31,32,35,.1);color:#1f2023}
+.fp-path-link:last-child{font-weight:700;color:#1f2023}
 .fp-body{flex:1;display:flex;min-height:0}
 .fp-sidebar{display:flex;flex-direction:column;border-right:1px solid rgba(26,26,30,.09);background:linear-gradient(180deg,#fbf8f3,#f6f0e6);min-width:220px;max-width:520px}
 .fp-side-head{display:flex;gap:8px;padding:10px;border-bottom:1px solid rgba(26,26,30,.09)}
 .fp-input{width:100%;padding:8px 10px;border:1px solid rgba(23,24,28,.2);border-radius:10px;background:#fff;color:#1f2023}
 .fp-tree{padding:8px;overflow:auto;flex:1}
-.fp-tree-node{display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:10px;cursor:pointer;font-size:13px;color:#423c34}
+.fp-tree-node{display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:10px;cursor:pointer;font-size:13px;color:#423c34;transition:background .15s ease,color .15s ease}
 .fp-tree-node:hover{background:rgba(35,31,28,.08)}
 .fp-tree-node.active{background:#1f2023;color:#fff}
 .fp-tree-indent{display:inline-block;width:12px;flex:none}
@@ -482,45 +521,50 @@
 .fp-main-scroll{flex:1;overflow:auto;padding:14px}
 .fp-group-title{font-weight:800;font-size:13px;color:#4f463d;margin:14px 0 8px}
 .fp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
-.fp-card{position:relative;border:1px solid rgba(24,24,27,.12);border-radius:14px;padding:11px;background:#fff;cursor:pointer;min-height:72px;box-shadow:0 6px 14px rgba(20,20,22,.06)}
+.fp-card{position:relative;border:1px solid rgba(24,24,27,.12);border-radius:14px;padding:11px;background:#fff;cursor:pointer;min-height:72px;box-shadow:0 6px 14px rgba(20,20,22,.06);transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
 .fp-card:hover{border-color:rgba(24,24,27,.28);box-shadow:0 10px 22px rgba(20,20,22,.12);transform:translateY(-1px)}
 .fp-card-title{font-size:13px;font-weight:700;line-height:1.35;word-break:break-word;padding-right:54px;color:#1d1e22}
 .fp-card-icons{position:absolute;right:8px;top:8px;display:flex;gap:6px}
 .fp-mini{font-size:11px;padding:2px 6px;border-radius:99px;background:#f2ede5;border:1px solid rgba(24,24,27,.12);color:#5d544a}
 .fp-mini.inject{background:#f6ebdc;border-color:rgba(132,88,35,.28);color:#845823}
 .fp-mini.fav{background:#f8e8ea;border-color:rgba(158,69,90,.28);color:#9e455a}
-.fp-bottom{border-top:1px solid rgba(26,26,30,.10);background:#f7f2e9;display:flex;flex-direction:column}
+.fp-bottom{border-top:1px solid rgba(26,26,30,.10);background:#f7f2e9;display:flex;flex-direction:column;transition:height .25s ease}
 .fp-bottom.collapsed{height:auto!important}
 .fp-bottom.collapsed .fp-preview{display:none}
 .fp-bottom-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;font-size:12px;color:#60574d}
 .fp-preview{overflow:auto;padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px}
-.fp-token{font-size:12px;border-radius:999px;padding:3px 10px;border:1px solid transparent}
+.fp-token{font-size:13px;border-radius:999px;padding:5px 12px;border:1px solid transparent;display:inline-flex;align-items:center;gap:4px;cursor:grab;user-select:none;transition:transform .15s ease,opacity .15s ease}
+.fp-token:active{cursor:grabbing}
+.fp-token .fp-token-del{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:rgba(0,0,0,.12);color:inherit;font-size:10px;line-height:1;cursor:pointer;opacity:.5;transition:opacity .15s ease,background .15s ease}
+.fp-token .fp-token-del:hover{opacity:1;background:rgba(200,50,50,.25)}
+.fp-token.dragging{opacity:.4;transform:scale(.95)}
+.fp-token.drag-over{transform:scale(1.05);box-shadow:0 0 0 2px rgba(100,150,255,.4)}
 .fp-token.item{background:#f1ebe2;border-color:rgba(26,26,30,.14);color:#3c342c}
 .fp-token.then{background:#ffe6c9;border-color:rgba(170,112,42,.34);color:#7e4e16}
 .fp-token.simultaneous{background:#ece7ff;border-color:rgba(92,77,155,.34);color:#4b3a8a}
 .fp-token.raw{background:#ececec;border-color:rgba(105,105,110,.28);color:#4a4a4f}
 .fp-split-v{width:5px;cursor:col-resize;background:linear-gradient(180deg,transparent,rgba(24,24,27,.18),transparent)}
 .fp-split-h{height:5px;cursor:row-resize;background:linear-gradient(90deg,transparent,rgba(24,24,27,.18),transparent)}
-.fp-menu{position:fixed;z-index:2147483600;min-width:148px;padding:6px;background:#fff;border:1px solid rgba(24,24,27,.16);border-radius:10px;box-shadow:0 14px 30px rgba(0,0,0,.18)}
+.fp-menu{position:fixed;z-index:2147483600;min-width:148px;padding:6px;background:#fff;border:1px solid rgba(24,24,27,.16);border-radius:10px;box-shadow:0 14px 30px rgba(0,0,0,.18);animation:fp-menu-pop .15s ease}
 .fp-menu-btn{display:block;width:100%;text-align:left;padding:8px;border-radius:7px;background:transparent;border:none;color:#1f2023;cursor:pointer;font-size:12px}
 .fp-menu-btn:hover{background:#f1ece4}
 #${TOAST_CONTAINER_ID}{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:2147483700;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;max-width:calc(100vw - 16px)}
-.fp-toast{pointer-events:auto;max-width:430px;padding:8px 12px;border-radius:12px;background:rgba(24,24,27,.92);border:1px solid rgba(255,255,255,.16);color:#faf8f4;font-size:12px;box-shadow:0 8px 20px rgba(0,0,0,.30)}
-.fp-modal{position:absolute;inset:0;background:rgba(11,12,14,.52);display:flex;align-items:center;justify-content:center;padding:20px}
-.fp-modal-card{width:min(760px,95%);max-height:88%;overflow:auto;border:1px solid rgba(24,24,27,.15);border-radius:14px;background:linear-gradient(180deg,#ffffff,#f7f2e9);padding:14px;color:#1f2023}
+.fp-toast{pointer-events:auto;max-width:430px;padding:8px 12px;border-radius:12px;background:rgba(24,24,27,.92);border:1px solid rgba(255,255,255,.16);color:#faf8f4;font-size:12px;box-shadow:0 8px 20px rgba(0,0,0,.30);animation:fp-toast-in .22s ease}
+.fp-modal{position:absolute;inset:0;background:rgba(11,12,14,.52);display:flex;align-items:center;justify-content:center;padding:20px;animation:fp-modal-fadein .2s ease}
+.fp-modal-card{width:min(760px,95%);max-height:88vh;overflow:hidden;display:flex;flex-direction:column;border:1px solid rgba(24,24,27,.15);border-radius:14px;background:linear-gradient(180deg,#ffffff,#f7f2e9);padding:14px;color:#1f2023;animation:fp-modal-card-in .25s ease}
 .fp-modal-title{font-weight:800;font-size:15px;margin-bottom:10px}
-.fp-settings-shell{display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px}
+.fp-settings-shell{display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px;flex:1;min-height:0;overflow:hidden}
 .fp-settings-nav{display:flex;flex-direction:column;gap:6px;padding-right:8px;border-right:1px solid rgba(24,24,27,.12)}
 .fp-settings-tab{padding:9px 10px;border:1px solid rgba(24,24,27,.16);border-radius:10px;background:#fff;font-size:12px;font-weight:700;cursor:pointer;text-align:left}
 .fp-settings-tab.active{background:#1f2023;color:#fff;border-color:#1f2023}
-.fp-settings-body{min-width:0}
+.fp-settings-body{min-width:0;overflow-y:auto;padding-right:4px}
 .fp-tab{display:none}
 .fp-tab.active{display:block}
 .fp-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
 .fp-row > label{width:98px;font-size:12px;color:#5d544b}
 .fp-row > input,.fp-row > textarea,.fp-row > select{flex:1;padding:8px;border-radius:10px;border:1px solid rgba(24,24,27,.18);background:#fff;color:#1f2023}
 .fp-row > textarea{min-height:90px;resize:vertical}
-.fp-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
+.fp-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px;flex-shrink:0}
 .fp-actions button{padding:8px 12px;border-radius:10px;border:1px solid rgba(24,24,27,.18);background:#fff;color:#1f2023;cursor:pointer;font-weight:600}
 .fp-actions button.primary{background:#1f2023;border-color:#1f2023;color:#fff}
 .fp-panel.fp-compact .fp-body{flex-direction:column}
@@ -529,6 +573,25 @@
 .fp-panel.fp-compact .fp-main{min-height:0}
 .fp-panel.fp-compact .fp-main-scroll{padding:10px}
 .fp-panel.fp-compact .fp-grid{grid-template-columns:1fr}
+/* 紧凑按钮列表模式 */
+.fp-compact-list{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.fp-compact-list .fp-compact-search{padding:8px 10px;border-bottom:1px solid rgba(26,26,30,.09)}
+.fp-compact-list .fp-compact-header{padding:8px 12px;font-weight:800;font-size:13px;color:#4f463d;border-bottom:1px solid rgba(26,26,30,.06);background:rgba(255,255,255,.4)}
+.fp-compact-list .fp-compact-scroll{flex:1;overflow:auto;padding:8px}
+.fp-compact-btns{display:flex;flex-wrap:wrap;gap:6px;padding:4px 0}
+.fp-compact-btns .fp-cbtn{display:inline-flex;align-items:center;gap:5px;padding:8px 14px;border:1px solid rgba(23,24,28,.16);border-radius:12px;background:rgba(255,255,255,.92);color:#1f2023;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;line-height:1.3;transition:background .15s,border-color .15s}
+.fp-compact-btns .fp-cbtn:hover{background:#fff;border-color:rgba(23,24,28,.32)}
+.fp-compact-btns .fp-cbtn:active{transform:scale(.97)}
+.fp-compact-btns .fp-cbtn.fp-cbtn-cat{background:linear-gradient(180deg,#f0f7f4,#e6f0eb);border-color:rgba(60,120,90,.22);color:#2d5a42}
+.fp-compact-btns .fp-cbtn.fp-cbtn-cat:hover{background:linear-gradient(180deg,#e8f2ec,#dceae3);border-color:rgba(60,120,90,.38)}
+.fp-compact-btns .fp-cbtn.fp-cbtn-fav{background:linear-gradient(180deg,#fef0f2,#fce4e8);border-color:rgba(158,69,90,.22);color:#9e455a}
+.fp-compact-btns .fp-cbtn.fp-cbtn-inject{background:linear-gradient(180deg,#fef3e6,#fceacd);border-color:rgba(132,88,35,.22);color:#845823}
+.fp-compact-sep{width:100%;height:1px;background:rgba(26,26,30,.08);margin:6px 0}
+.fp-compact-group-label{font-size:12px;color:#8a7e72;font-weight:700;padding:6px 2px 2px;width:100%}
+.fp-card-excerpt{font-size:11px;color:#8a7e72;margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-all;line-height:1.4;opacity:.7}
+.fp-cbtn-excerpt{font-size:10px;color:#8a7e72;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;opacity:.65;font-weight:400}
+.fp-compact-bottom{flex-shrink:0;max-height:120px;border-top:1px solid rgba(26,26,30,.10)}
+.fp-compact-bottom .fp-preview{max-height:80px;overflow:auto}
 .fp-panel[data-theme="ink-noir"]{background:linear-gradient(180deg,#16181d 0%,#121419 100%);color:#e8edf5;border-color:rgba(255,255,255,.12)}
 .fp-panel[data-theme="ink-noir"] .fp-top,
 .fp-panel[data-theme="ink-noir"] .fp-path,
@@ -540,6 +603,16 @@
 .fp-panel[data-theme="ink-noir"] .fp-card{background:#1e232c;border-color:rgba(255,255,255,.14)}
 .fp-panel[data-theme="ink-noir"] .fp-tree-node{color:#d6deea}
 .fp-panel[data-theme="ink-noir"] .fp-tree-node.active{background:#e8edf5;color:#171a20}
+.fp-panel[data-theme="ink-noir"] .fp-cbtn{background:#1f2430;color:#e8edf5;border-color:rgba(255,255,255,.18)}
+.fp-panel[data-theme="ink-noir"] .fp-cbtn.fp-cbtn-cat{background:linear-gradient(180deg,#1c2a24,#1a2420);color:#8ac4a0;border-color:rgba(100,180,130,.28)}
+.fp-panel[data-theme="ink-noir"] .fp-cbtn.fp-cbtn-fav{background:linear-gradient(180deg,#2a1c22,#241a1e);color:#e08a9a;border-color:rgba(180,90,110,.28)}
+.fp-panel[data-theme="ink-noir"] .fp-cbtn.fp-cbtn-inject{background:linear-gradient(180deg,#2a2418,#242014);color:#d4a86a;border-color:rgba(180,130,60,.28)}
+.fp-panel[data-theme="ink-noir"] .fp-compact-header{color:#d6deea;background:rgba(255,255,255,.04)}
+.fp-panel[data-theme="ink-noir"] .fp-compact-group-label{color:#8a9aaa}
+.fp-panel[data-theme="ink-noir"] .fp-compact-sep{background:rgba(255,255,255,.08)}
+.fp-panel[data-theme="ink-noir"] .fp-card-excerpt,.fp-panel[data-theme="ink-noir"] .fp-cbtn-excerpt{color:#8a9aaa}
+.fp-panel[data-theme="ink-noir"] .fp-path-link:hover{background:rgba(255,255,255,.1);color:#e8edf5}
+.fp-panel[data-theme="ink-noir"] .fp-path-link:last-child{color:#e8edf5}
 .fp-panel[data-theme="sand-gold"]{background:linear-gradient(180deg,#f6efe3 0%,#efe4d3 100%);color:#2a241c}
 .fp-panel[data-theme="sand-gold"] .fp-top{background:linear-gradient(180deg,#fff9ef,#f2e6d4)}
 .fp-panel[data-theme="sand-gold"] .fp-path,
@@ -549,6 +622,124 @@
 .fp-panel[data-theme="sand-gold"] .fp-modal-card{background:#f7efdf!important;color:#2a241c}
 .fp-panel[data-theme="sand-gold"] .fp-btn{background:#fff7ea;color:#2a241c;border-color:rgba(97,74,38,.22)}
 .fp-panel[data-theme="sand-gold"] .fp-card{background:#fffaf1;border-color:rgba(97,74,38,.14)}
+.fp-panel[data-theme="sand-gold"] .fp-cbtn{background:#fff7ea;color:#2a241c;border-color:rgba(97,74,38,.18)}
+.fp-panel[data-theme="sand-gold"] .fp-cbtn.fp-cbtn-cat{background:linear-gradient(180deg,#f0efe4,#e8e4d8);border-color:rgba(80,100,70,.22);color:#3a5030}
+.fp-panel[data-theme="sand-gold"] .fp-compact-header{color:#5a4e3c;background:rgba(255,250,240,.5)}
+.fp-panel[data-theme="sand-gold"] .fp-card-excerpt,.fp-panel[data-theme="sand-gold"] .fp-cbtn-excerpt{color:#8a7e6a}
+.fp-panel[data-theme="rose-pink"]{background:linear-gradient(180deg,#fff0f3 0%,#fce8ec 100%);color:#4a2832}
+.fp-panel[data-theme="rose-pink"] .fp-top{background:linear-gradient(180deg,#fff8f9,#fceef2)}
+.fp-panel[data-theme="rose-pink"] .fp-path,
+.fp-panel[data-theme="rose-pink"] .fp-sidebar,
+.fp-panel[data-theme="rose-pink"] .fp-main,
+.fp-panel[data-theme="rose-pink"] .fp-bottom,
+.fp-panel[data-theme="rose-pink"] .fp-modal-card{background:#fff5f7!important;color:#4a2832}
+.fp-panel[data-theme="rose-pink"] .fp-btn{background:#fff0f3;color:#4a2832;border-color:rgba(158,69,90,.22)}
+.fp-panel[data-theme="rose-pink"] .fp-card{background:#fffbfc;border-color:rgba(158,69,90,.14)}
+.fp-panel[data-theme="rose-pink"] .fp-tree-node{color:#5a3842}
+.fp-panel[data-theme="rose-pink"] .fp-tree-node.active{background:#9e455a;color:#fff}
+.fp-panel[data-theme="rose-pink"] .fp-cbtn{background:#fff0f3;color:#4a2832;border-color:rgba(158,69,90,.18)}
+.fp-panel[data-theme="rose-pink"] .fp-cbtn.fp-cbtn-cat{background:linear-gradient(180deg,#f0f7f4,#e6f0eb);border-color:rgba(60,120,90,.22);color:#2d5a42}
+.fp-panel[data-theme="rose-pink"] .fp-cbtn.fp-cbtn-fav{background:linear-gradient(180deg,#fef0f2,#fce4e8);border-color:rgba(158,69,90,.26);color:#9e455a}
+.fp-panel[data-theme="rose-pink"] .fp-cbtn.fp-cbtn-inject{background:linear-gradient(180deg,#fef3e6,#fceacd);border-color:rgba(132,88,35,.22);color:#845823}
+.fp-panel[data-theme="rose-pink"] .fp-compact-header{color:#5a3842;background:rgba(255,245,247,.6)}
+.fp-panel[data-theme="rose-pink"] .fp-compact-group-label{color:#8a6a72}
+.fp-panel[data-theme="rose-pink"] .fp-compact-sep{background:rgba(158,69,90,.12)}
+.fp-panel[data-theme="rose-pink"] .fp-card-excerpt,.fp-panel[data-theme="rose-pink"] .fp-cbtn-excerpt{color:#b08a92}
+.fp-panel[data-theme="rose-pink"] .fp-input{background:#fff;border-color:rgba(158,69,90,.2)}
+.fp-panel[data-theme="rose-pink"] .fp-card-title{color:#4a2832}
+.fp-panel[data-theme="rose-pink"] .fp-row > label{color:#6a4852}
+.fp-panel[data-theme="rose-pink"] .fp-row > input,.fp-panel[data-theme="rose-pink"] .fp-row > textarea,.fp-panel[data-theme="rose-pink"] .fp-row > select{background:#fff;border-color:rgba(158,69,90,.2);color:#4a2832}
+.fp-panel[data-theme="rose-pink"] .fp-settings-tab{background:#fff0f3;border-color:rgba(158,69,90,.18);color:#5a3842}
+.fp-panel[data-theme="rose-pink"] .fp-settings-tab.active{background:#9e455a;border-color:#9e455a;color:#fff}
+.fp-panel[data-theme="rose-pink"] .fp-modal-title{color:#4a2832}
+.fp-panel[data-theme="forest-green"]{background:linear-gradient(180deg,#1a2e24 0%,#142820 100%);color:#d4ead8}
+.fp-panel[data-theme="forest-green"] .fp-top{background:linear-gradient(180deg,#1e3428,#1a2e24)}
+.fp-panel[data-theme="forest-green"] .fp-path,
+.fp-panel[data-theme="forest-green"] .fp-sidebar,
+.fp-panel[data-theme="forest-green"] .fp-main,
+.fp-panel[data-theme="forest-green"] .fp-bottom,
+.fp-panel[data-theme="forest-green"] .fp-modal-card{background:#1a2e24!important;color:#d4ead8}
+.fp-panel[data-theme="forest-green"] .fp-btn{background:#243830;color:#d4ead8;border-color:rgba(140,200,160,.22)}
+.fp-panel[data-theme="forest-green"] .fp-card{background:#1e3428;border-color:rgba(140,200,160,.16)}
+.fp-panel[data-theme="forest-green"] .fp-tree-node{color:#b4d4ba}
+.fp-panel[data-theme="forest-green"] .fp-tree-node.active{background:#8ac4a0;color:#142820}
+.fp-panel[data-theme="forest-green"] .fp-cbtn{background:#243830;color:#d4ead8;border-color:rgba(140,200,160,.2)}
+.fp-panel[data-theme="forest-green"] .fp-cbtn.fp-cbtn-cat{background:linear-gradient(180deg,#2a4238,#243830);border-color:rgba(140,200,160,.28);color:#8ac4a0}
+.fp-panel[data-theme="forest-green"] .fp-cbtn.fp-cbtn-fav{background:linear-gradient(180deg,#3a2832,#32242a);border-color:rgba(200,120,140,.24);color:#e0a0aa}
+.fp-panel[data-theme="forest-green"] .fp-cbtn.fp-cbtn-inject{background:linear-gradient(180deg,#3a3228,#322a22);border-color:rgba(200,160,100,.24);color:#d4b480}
+.fp-panel[data-theme="forest-green"] .fp-compact-header{color:#b4d4ba;background:rgba(30,52,40,.6)}
+.fp-panel[data-theme="forest-green"] .fp-compact-group-label{color:#8aaa92}
+.fp-panel[data-theme="forest-green"] .fp-compact-sep{background:rgba(140,200,160,.12)}
+.fp-panel[data-theme="forest-green"] .fp-card-excerpt,.fp-panel[data-theme="forest-green"] .fp-cbtn-excerpt{color:#7aa88a}
+.fp-panel[data-theme="forest-green"] .fp-path-link:hover{background:rgba(255,255,255,.1);color:#d4e8dc}
+.fp-panel[data-theme="forest-green"] .fp-path-link:last-child{color:#d4e8dc}
+.fp-panel[data-theme="forest-green"] .fp-input{background:#1e3428;border-color:rgba(140,200,160,.2);color:#d4ead8}
+.fp-panel[data-theme="forest-green"] .fp-card-title{color:#d4ead8}
+.fp-panel[data-theme="forest-green"] .fp-row > label{color:#a4c4aa}
+.fp-panel[data-theme="forest-green"] .fp-row > input,.fp-panel[data-theme="forest-green"] .fp-row > textarea,.fp-panel[data-theme="forest-green"] .fp-row > select{background:#1e3428;border-color:rgba(140,200,160,.2);color:#d4ead8}
+.fp-panel[data-theme="forest-green"] .fp-settings-tab{background:#243830;border-color:rgba(140,200,160,.2);color:#b4d4ba}
+.fp-panel[data-theme="forest-green"] .fp-settings-tab.active{background:#8ac4a0;border-color:#8ac4a0;color:#142820}
+.fp-panel[data-theme="forest-green"] .fp-modal-title{color:#d4ead8}
+.fp-panel[data-theme="ocean-blue"]{background:linear-gradient(180deg,#141e2a 0%,#101824 100%);color:#d0e4f4}
+.fp-panel[data-theme="ocean-blue"] .fp-top{background:linear-gradient(180deg,#18242e,#141e2a)}
+.fp-panel[data-theme="ocean-blue"] .fp-path,
+.fp-panel[data-theme="ocean-blue"] .fp-sidebar,
+.fp-panel[data-theme="ocean-blue"] .fp-main,
+.fp-panel[data-theme="ocean-blue"] .fp-bottom,
+.fp-panel[data-theme="ocean-blue"] .fp-modal-card{background:#141e2a!important;color:#d0e4f4}
+.fp-panel[data-theme="ocean-blue"] .fp-btn{background:#1e2c3a;color:#d0e4f4;border-color:rgba(100,160,220,.22)}
+.fp-panel[data-theme="ocean-blue"] .fp-card{background:#18242e;border-color:rgba(100,160,220,.16)}
+.fp-panel[data-theme="ocean-blue"] .fp-tree-node{color:#a8c8e0}
+.fp-panel[data-theme="ocean-blue"] .fp-tree-node.active{background:#6aa0d4;color:#101824}
+.fp-panel[data-theme="ocean-blue"] .fp-cbtn{background:#1e2c3a;color:#d0e4f4;border-color:rgba(100,160,220,.2)}
+.fp-panel[data-theme="ocean-blue"] .fp-cbtn.fp-cbtn-cat{background:linear-gradient(180deg,#1c2a34,#1a262e);border-color:rgba(100,180,140,.24);color:#80c4a0}
+.fp-panel[data-theme="ocean-blue"] .fp-cbtn.fp-cbtn-fav{background:linear-gradient(180deg,#2a1c28,#24182e);border-color:rgba(180,100,160,.24);color:#d0a0c4}
+.fp-panel[data-theme="ocean-blue"] .fp-cbtn.fp-cbtn-inject{background:linear-gradient(180deg,#2a2618,#242014);border-color:rgba(180,140,80,.24);color:#d4b480}
+.fp-panel[data-theme="ocean-blue"] .fp-compact-header{color:#a8c8e0;background:rgba(24,36,46,.6)}
+.fp-panel[data-theme="ocean-blue"] .fp-compact-group-label{color:#7898b0}
+.fp-panel[data-theme="ocean-blue"] .fp-compact-sep{background:rgba(100,160,220,.12)}
+.fp-panel[data-theme="ocean-blue"] .fp-card-excerpt,.fp-panel[data-theme="ocean-blue"] .fp-cbtn-excerpt{color:#7a9ab8}
+.fp-panel[data-theme="ocean-blue"] .fp-path-link:hover{background:rgba(255,255,255,.1);color:#d0e0f0}
+.fp-panel[data-theme="ocean-blue"] .fp-path-link:last-child{color:#d0e0f0}
+.fp-panel[data-theme="ocean-blue"] .fp-input{background:#18242e;border-color:rgba(100,160,220,.2);color:#d0e4f4}
+.fp-panel[data-theme="ocean-blue"] .fp-card-title{color:#d0e4f4}
+.fp-panel[data-theme="ocean-blue"] .fp-row > label{color:#98b8d0}
+.fp-panel[data-theme="ocean-blue"] .fp-row > input,.fp-panel[data-theme="ocean-blue"] .fp-row > textarea,.fp-panel[data-theme="ocean-blue"] .fp-row > select{background:#18242e;border-color:rgba(100,160,220,.2);color:#d0e4f4}
+.fp-panel[data-theme="ocean-blue"] .fp-settings-tab{background:#1e2c3a;border-color:rgba(100,160,220,.2);color:#a8c8e0}
+.fp-panel[data-theme="ocean-blue"] .fp-settings-tab.active{background:#6aa0d4;border-color:#6aa0d4;color:#101824}
+.fp-panel[data-theme="ocean-blue"] .fp-modal-title{color:#d0e4f4}
+.fp-panel[data-theme="purple-mist"]{background:linear-gradient(180deg,#f4f0fa 0%,#ebe4f4 100%);color:#3a2848}
+.fp-panel[data-theme="purple-mist"] .fp-top{background:linear-gradient(180deg,#faf8fc,#f0eaf6)}
+.fp-panel[data-theme="purple-mist"] .fp-path,
+.fp-panel[data-theme="purple-mist"] .fp-sidebar,
+.fp-panel[data-theme="purple-mist"] .fp-main,
+.fp-panel[data-theme="purple-mist"] .fp-bottom,
+.fp-panel[data-theme="purple-mist"] .fp-modal-card{background:#f6f2fa!important;color:#3a2848}
+.fp-panel[data-theme="purple-mist"] .fp-btn{background:#f0eaf6;color:#3a2848;border-color:rgba(120,90,160,.22)}
+.fp-panel[data-theme="purple-mist"] .fp-card{background:#fcfaff;border-color:rgba(120,90,160,.14)}
+.fp-panel[data-theme="purple-mist"] .fp-tree-node{color:#4a3858}
+.fp-panel[data-theme="purple-mist"] .fp-tree-node.active{background:#8a6ab0;color:#fff}
+.fp-panel[data-theme="purple-mist"] .fp-cbtn{background:#f0eaf6;color:#3a2848;border-color:rgba(120,90,160,.18)}
+.fp-panel[data-theme="purple-mist"] .fp-cbtn.fp-cbtn-cat{background:linear-gradient(180deg,#eaf4f0,#e4f0ea);border-color:rgba(70,130,100,.22);color:#2a6048}
+.fp-panel[data-theme="purple-mist"] .fp-cbtn.fp-cbtn-fav{background:linear-gradient(180deg,#f8eaf0,#f4e0ea);border-color:rgba(160,80,120,.22);color:#a05078}
+.fp-panel[data-theme="purple-mist"] .fp-cbtn.fp-cbtn-inject{background:linear-gradient(180deg,#f8f2e8,#f4eade);border-color:rgba(140,110,60,.22);color:#8a6a30}
+.fp-panel[data-theme="purple-mist"] .fp-compact-header{color:#4a3858;background:rgba(246,242,250,.6)}
+.fp-panel[data-theme="purple-mist"] .fp-compact-group-label{color:#7a6888}
+.fp-panel[data-theme="purple-mist"] .fp-compact-sep{background:rgba(120,90,160,.12)}
+.fp-panel[data-theme="purple-mist"] .fp-card-excerpt,.fp-panel[data-theme="purple-mist"] .fp-cbtn-excerpt{color:#9a8ab0}
+.fp-panel[data-theme="purple-mist"] .fp-input{background:#fff;border-color:rgba(120,90,160,.2)}
+.fp-panel[data-theme="purple-mist"] .fp-card-title{color:#3a2848}
+.fp-panel[data-theme="purple-mist"] .fp-row > label{color:#5a4868}
+.fp-panel[data-theme="purple-mist"] .fp-row > input,.fp-panel[data-theme="purple-mist"] .fp-row > textarea,.fp-panel[data-theme="purple-mist"] .fp-row > select{background:#fff;border-color:rgba(120,90,160,.2);color:#3a2848}
+.fp-panel[data-theme="purple-mist"] .fp-settings-tab{background:#f0eaf6;border-color:rgba(120,90,160,.18);color:#4a3858}
+.fp-panel[data-theme="purple-mist"] .fp-settings-tab.active{background:#8a6ab0;border-color:#8a6ab0;color:#fff}
+.fp-panel[data-theme="purple-mist"] .fp-modal-title{color:#3a2848}
+@keyframes fp-modal-fadein{from{opacity:0}to{opacity:1}}
+@keyframes fp-modal-card-in{from{opacity:0;transform:scale(.96) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
+@keyframes fp-toast-in{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fp-menu-pop{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
+@keyframes fp-tab-fadein{from{opacity:0}to{opacity:1}}
+.fp-tab.active{animation:fp-tab-fadein .2s ease}
 @media (max-width: 900px){
   .fp-top{grid-template-columns:1fr;gap:8px}
   .fp-left,.fp-right{justify-content:center}
@@ -558,6 +749,22 @@
 }
 `;
     (pD.head || pD.body).appendChild(style);
+  }
+
+  const CUSTOM_CSS_ID = 'fast-plot-custom-css-v1';
+  function applyCustomCSS() {
+    const css = state.pack?.settings?.ui?.customCSS || '';
+    let el = pD.getElementById(CUSTOM_CSS_ID) as HTMLStyleElement | null;
+    if (!css) {
+      if (el) el.remove();
+      return;
+    }
+    if (!el) {
+      el = pD.createElement('style');
+      el.id = CUSTOM_CSS_ID;
+      (pD.head || pD.body).appendChild(el);
+    }
+    el.textContent = css;
   }
 
   function ensureToastContainer() {
@@ -629,6 +836,11 @@
     });
   }
 
+  function truncateContent(content: string, maxLen = 60): string {
+    const text = String(content || '').replace(/\{@[^}]*\}/g, '…').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+    return text.length > maxLen ? text.slice(0, maxLen) + '…' : text;
+  }
+
   function iconSvg(name: string): string {
     const map: Record<string, string> = {
       back: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M9.8 3.2 5 8l4.8 4.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.4 8h5.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
@@ -640,6 +852,8 @@
       download: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3.5v7.3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="m10.8 7.8-2.8 2.8-2.8-2.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 12.5h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
       settings: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m6.7 2 .4 1.4a4.8 4.8 0 0 1 1.8 0L9.3 2l1.6.5-.1 1.5c.5.3 1 .7 1.3 1.3l1.5-.1.5 1.6-1.4.4a4.8 4.8 0 0 1 0 1.8l1.4.4-.5 1.6-1.5-.1c-.3.5-.7 1-1.3 1.3l.1 1.5-1.6.5-.4-1.4a4.8 4.8 0 0 1-1.8 0l-.4 1.4-1.6-.5.1-1.5a4.2 4.2 0 0 1-1.3-1.3l-1.5.1-.5-1.6 1.4-.4a4.8 4.8 0 0 1 0-1.8l-1.4-.4.5-1.6 1.5.1c.3-.5.7-1 1.3-1.3l-.1-1.5L6.7 2Z" stroke="currentColor" stroke-width="1.1"/><circle cx="8" cy="8" r="1.8" stroke="currentColor" stroke-width="1.2"/></svg>',
       close: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m4 4 8 8M12 4 4 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+      'chevron-up': '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 10.5 8 6.5l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      'chevron-down': '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 5.5 8 9.5l4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     };
     return map[name] || '';
   }
@@ -707,9 +921,8 @@
   function refreshPreviewPanel(): void {
     const overlay = pD.getElementById(OVERLAY_ID);
     if (!overlay) return;
-    const previewEl = overlay.querySelector('.fp-preview') as HTMLElement | null;
-    if (!previewEl) return;
-    renderPreview(previewEl);
+    const previewEls = overlay.querySelectorAll('.fp-preview');
+    previewEls.forEach((el) => renderPreview(el as HTMLElement));
   }
 
   async function runItem(item: Item): Promise<void> {
@@ -728,14 +941,11 @@
     toast(`已追加: ${item.name}`);
   }
 
-  function addConnector(type: 'then' | 'simultaneous'): void {
+  function addConnector(connector: ConnectorButton): void {
     if (!state.pack) return;
-    const token = type === 'then'
-      ? state.pack.settings.tokens.then
-      : state.pack.settings.tokens.simultaneous;
-    appendToInput(token);
-    pushPreviewToken(type === 'then' ? 'then' : 'simultaneous', token);
-    toast(type === 'then' ? '已插入“然后”' : '已插入“同时”');
+    appendToInput(connector.token);
+    pushPreviewToken(connector.label, connector.token);
+    toast(`已插入“${connector.label}”`);
   }
 
   function closeContextMenu() {
@@ -747,9 +957,33 @@
 
   function renderPath(pathEl: HTMLElement): void {
     if (!state.pack) return;
+    pathEl.innerHTML = '';
     const nodes = getPath(state.currentCategoryId);
     state.pack.uiState.lastPath = nodes.map((n) => n.id);
-    pathEl.textContent = nodes.map((n) => n.name).join('  /  ') || '未选择分类';
+    
+    if (!nodes.length) {
+      pathEl.textContent = '未选择分类';
+      return;
+    }
+    
+    nodes.forEach((node, idx) => {
+      if (idx > 0) {
+        const sep = pD.createElement('span');
+        sep.className = 'fp-path-sep';
+        sep.textContent = ' / ';
+        pathEl.appendChild(sep);
+      }
+      const link = pD.createElement('span');
+      link.className = 'fp-path-link';
+      link.textContent = node.name;
+      link.title = `跳转到: ${node.name}`;
+      link.onclick = () => {
+        state.history.push(state.currentCategoryId);
+        state.currentCategoryId = node.id;
+        renderWorkbench();
+      };
+      pathEl.appendChild(link);
+    });
   }
 
   function treeChildren(parentId: string | null): Category[] {
@@ -958,27 +1192,35 @@
           <div class="fp-settings-body">
             <div class="fp-tab active" data-tab="placeholders">
               ${rows.map((k) => `<div class="fp-row"><label>${k}</label><input data-ph="${k}" value="${String(placeholders[k] || '')}" /></div>`).join('')}
-              <div class="fp-row"><label>自定义占位符</label><input data-new-key placeholder="例如：主角" /></div>
-              <div class="fp-row"><label>对应值</label><input data-new-val placeholder="例如：勇者" /></div>
-              ${customKeys.length ? `<div class="fp-row"><label>现有扩展</label><textarea readonly>${customKeys.map((k) => `${k}=${placeholders[k]}`).join('\n')}</textarea></div>` : ''}
+              <div style="border-top:1px solid rgba(24,24,27,.1);margin-top:10px;padding-top:10px">
+                <div style="font-size:12px;font-weight:700;color:#5d544b;margin-bottom:8px">自定义占位符</div>
+                <div data-custom-ph-list></div>
+                <button class="fp-btn" data-add-ph style="margin-top:6px">+ 添加占位符</button>
+              </div>
             </div>
             <div class="fp-tab" data-tab="tokens">
-              <div class="fp-row"><label>同时按钮文本</label><input data-token="simultaneous" value="${state.pack!.settings.tokens.simultaneous || '<同时>'}" /></div>
-              <div class="fp-row"><label>然后按钮文本</label><input data-token="then" value="${state.pack!.settings.tokens.then || '<然后>'}" /></div>
-              <div class="fp-row"><label>默认执行方式</label>
-                <select data-default-mode>
-                  <option value="append" ${state.pack!.settings.defaults.mode === 'append' ? 'selected' : ''}>追加到输入框</option>
-                  <option value="inject" ${state.pack!.settings.defaults.mode === 'inject' ? 'selected' : ''}>注入上下文</option>
-                </select>
+              <div style="font-size:12px;color:#8a7e72;margin-bottom:8px">自定义顶栏连接符按钮，点击后插入对应文本到输入框</div>
+              <div data-connectors-list></div>
+              <button class="fp-btn" data-add-connector style="margin-top:8px">+ 添加连接符</button>
+              <div style="border-top:1px solid rgba(24,24,27,.1);margin-top:12px;padding-top:12px">
+                <div class="fp-row"><label>默认执行方式</label>
+                  <select data-default-mode>
+                    <option value="append" ${state.pack!.settings.defaults.mode === 'append' ? 'selected' : ''}>追加到输入框</option>
+                    <option value="inject" ${state.pack!.settings.defaults.mode === 'inject' ? 'selected' : ''}>注入上下文</option>
+                  </select>
+                </div>
               </div>
             </div>
             <div class="fp-tab" data-tab="themes">
               <div class="fp-row"><label>主题风格</label>
                 <select data-theme>
-                  <option value="herdi-light" ${currentTheme === 'herdi-light' ? 'selected' : ''}>Herdi Light</option>
-                  <option value="ink-noir" ${currentTheme === 'ink-noir' ? 'selected' : ''}>Ink Noir</option>
-                  <option value="sand-gold" ${currentTheme === 'sand-gold' ? 'selected' : ''}>Sand Gold</option>
+                  ${Object.keys(THEME_NAMES).map(k => `<option value="${k}" ${currentTheme === k ? 'selected' : ''}>${THEME_NAMES[k]}</option>`).join('')}
                 </select>
+              </div>
+              <div class="fp-row" style="align-items:flex-start"><label>自定义CSS</label><textarea data-custom-css placeholder="输入自定义CSS样式...">${state.pack!.settings.ui.customCSS || ''}</textarea></div>
+              <div class="fp-row" style="gap:8px;justify-content:flex-end">
+                <button class="fp-btn" data-export-theme>导出主题</button>
+                <button class="fp-btn" data-import-theme>导入主题</button>
               </div>
             </div>
             <div class="fp-tab" data-tab="advanced">
@@ -1003,27 +1245,160 @@
         };
       }
 
+      // 连接符列表管理
+      const localConnectors: ConnectorButton[] = JSON.parse(JSON.stringify(state.pack!.settings.connectors || []));
+      const renderConnectorsList = () => {
+        const listEl = card.querySelector('[data-connectors-list]') as HTMLElement;
+        if (!listEl) return;
+        listEl.innerHTML = '';
+        localConnectors.forEach((conn, idx) => {
+          const row = pD.createElement('div');
+          row.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:6px';
+          row.innerHTML = `
+            <input data-conn-label="${idx}" value="${conn.label}" placeholder="名称" style="width:80px;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px" />
+            <input data-conn-token="${idx}" value="${conn.token}" placeholder="插入内容" style="flex:1;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px" />
+            <select data-conn-color="${idx}" style="padding:6px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px">
+              ${['orange','purple','green','blue','red','cyan'].map(c => `<option value="${c}" ${conn.color === c ? 'selected' : ''}>${c}</option>`).join('')}
+            </select>
+            <button class="fp-btn icon-only" data-del-conn="${idx}" title="删除" style="padding:4px 8px;font-size:14px;color:#c44">✕</button>
+          `;
+          listEl.appendChild(row);
+          (row.querySelector(`[data-del-conn="${idx}"]`) as HTMLElement).onclick = () => {
+            localConnectors.splice(idx, 1);
+            renderConnectorsList();
+          };
+        });
+      };
+      renderConnectorsList();
+      (card.querySelector('[data-add-connector]') as HTMLElement).onclick = () => {
+        localConnectors.push({ id: uid('conn'), label: '', token: '', color: 'orange' });
+        renderConnectorsList();
+      };
+
+      // 自定义占位符列表管理
+      const localCustomPhs: Array<{key: string; value: string}> = customKeys.map(k => ({ key: k, value: placeholders[k] || '' }));
+      const renderCustomPhList = () => {
+        const listEl = card.querySelector('[data-custom-ph-list]') as HTMLElement;
+        if (!listEl) return;
+        listEl.innerHTML = '';
+        localCustomPhs.forEach((ph, idx) => {
+          const row = pD.createElement('div');
+          row.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:6px';
+          row.innerHTML = `
+            <input data-cph-key="${idx}" value="${ph.key}" placeholder="键名" style="width:100px;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px" />
+            <input data-cph-val="${idx}" value="${ph.value}" placeholder="值" style="flex:1;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px" />
+            <button class="fp-btn icon-only" data-del-cph="${idx}" title="删除" style="padding:4px 8px;font-size:14px;color:#c44">✕</button>
+          `;
+          listEl.appendChild(row);
+          (row.querySelector(`[data-del-cph="${idx}"]`) as HTMLElement).onclick = () => {
+            localCustomPhs.splice(idx, 1);
+            renderCustomPhList();
+          };
+        });
+      };
+      renderCustomPhList();
+      (card.querySelector('[data-add-ph]') as HTMLElement).onclick = () => {
+        localCustomPhs.push({ key: '', value: '' });
+        renderCustomPhList();
+      };
+
+      const themeSelect = card.querySelector('[data-theme]') as HTMLSelectElement | null;
+      if (themeSelect) {
+        themeSelect.onchange = () => {
+          const panel = pD.querySelector('.fp-panel') as HTMLElement | null;
+          if (panel) panel.setAttribute('data-theme', themeSelect.value);
+        };
+      }
+
+      const exportThemeBtn = card.querySelector('[data-export-theme]') as HTMLElement | null;
+      if (exportThemeBtn) {
+        exportThemeBtn.onclick = () => {
+          const themeData = {
+            theme: (card.querySelector('[data-theme]') as HTMLSelectElement)?.value || 'herdi-light',
+            customCSS: (card.querySelector('[data-custom-css]') as HTMLTextAreaElement)?.value || '',
+          };
+          const blob = new Blob([JSON.stringify(themeData, null, 2)], { type: 'application/json' });
+          const a = pD.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = `快速回复管理器_主题_${Date.now()}.json`;
+          a.click();
+          URL.revokeObjectURL(a.href);
+          toast('主题已导出');
+        };
+      }
+      const importThemeBtn = card.querySelector('[data-import-theme]') as HTMLElement | null;
+      if (importThemeBtn) {
+        importThemeBtn.onclick = () => {
+          const input = pD.createElement('input');
+          input.type = 'file';
+          input.accept = '.json';
+          input.onchange = () => {
+            const file = input.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+              try {
+                const data = JSON.parse(reader.result as string);
+                if (data.theme) {
+                  (card.querySelector('[data-theme]') as HTMLSelectElement).value = data.theme;
+                }
+                if (data.customCSS !== undefined) {
+                  (card.querySelector('[data-custom-css]') as HTMLTextAreaElement).value = data.customCSS;
+                }
+                const panel = pD.querySelector('.fp-panel') as HTMLElement | null;
+                if (panel && data.theme) panel.setAttribute('data-theme', data.theme);
+                toast('主题已导入，点击保存应用');
+              } catch (e) {
+                toast('导入失败：文件格式错误');
+              }
+            };
+            reader.readAsText(file);
+          };
+          input.click();
+        };
+      }
+
       (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = close;
       (card.querySelector('[data-save]') as HTMLElement | null)!.onclick = () => {
-        for (const k of rows) {
-          const el = card.querySelector(`[data-ph="${k}"]`) as HTMLInputElement | null;
-          placeholders[k] = String(el?.value || '').trim() || k;
-        }
-        const tokenSim = (card.querySelector('[data-token="simultaneous"]') as HTMLInputElement | null)?.value.trim();
-        const tokenThen = (card.querySelector('[data-token="then"]') as HTMLInputElement | null)?.value.trim();
-        state.pack!.settings.tokens.simultaneous = tokenSim || '<同时>';
-        state.pack!.settings.tokens.then = tokenThen || '<然后>';
+        // 收集连接符数据
+        const updatedConnectors: ConnectorButton[] = [];
+        localConnectors.forEach((conn, idx) => {
+          const label = (card.querySelector(`[data-conn-label="${idx}"]`) as HTMLInputElement)?.value.trim();
+          const token = (card.querySelector(`[data-conn-token="${idx}"]`) as HTMLInputElement)?.value.trim();
+          const color = (card.querySelector(`[data-conn-color="${idx}"]`) as HTMLSelectElement)?.value || 'orange';
+          if (label && token) {
+            updatedConnectors.push({ id: conn.id, label, token, color });
+          }
+        });
+        state.pack!.settings.connectors = updatedConnectors;
+        // 同步到 tokens（向后兼容）
+        const thenConn = updatedConnectors.find(c => c.label === '然后');
+        const simulConn = updatedConnectors.find(c => c.label === '同时');
+        state.pack!.settings.tokens.then = thenConn?.token || '<然后>';
+        state.pack!.settings.tokens.simultaneous = simulConn?.token || '<同时>';
         state.pack!.settings.defaults.mode = (card.querySelector('[data-default-mode]') as HTMLSelectElement | null)?.value === 'inject' ? 'inject' : 'append';
         state.pack!.settings.ui = state.pack!.settings.ui || {};
         state.pack!.settings.ui.theme = (card.querySelector('[data-theme]') as HTMLSelectElement | null)?.value || 'herdi-light';
+        state.pack!.settings.ui.customCSS = (card.querySelector('[data-custom-css]') as HTMLTextAreaElement | null)?.value || '';
         const toastMax = Number((card.querySelector('[data-toast-max]') as HTMLInputElement | null)?.value || 4);
         const toastTimeout = Number((card.querySelector('[data-toast-timeout]') as HTMLInputElement | null)?.value || 1800);
         state.pack!.settings.toast.maxStack = Math.max(1, Math.min(8, toastMax || 4));
         state.pack!.settings.toast.timeout = Math.max(600, Math.min(8000, toastTimeout || 1800));
-        const newKey = (card.querySelector('[data-new-key]') as HTMLInputElement | null)?.value.trim();
-        const newVal = (card.querySelector('[data-new-val]') as HTMLInputElement | null)?.value.trim();
-        if (newKey) placeholders[newKey] = newVal || newKey;
-        state.pack!.settings.placeholders = placeholders;
+        // 收集占位符（包括预定义和自定义）
+        const newPlaceholders: Record<string, string> = {};
+        for (const k of rows) {
+          const el = card.querySelector(`[data-ph="${k}"]`) as HTMLInputElement | null;
+          newPlaceholders[k] = String(el?.value || '').trim() || k;
+        }
+        // 收集自定义占位符列表
+        localCustomPhs.forEach((_ph, idx) => {
+          const key = (card.querySelector(`[data-cph-key="${idx}"]`) as HTMLInputElement)?.value.trim();
+          const val = (card.querySelector(`[data-cph-val="${idx}"]`) as HTMLInputElement)?.value.trim();
+          if (key && !rows.includes(key)) {
+            newPlaceholders[key] = val || key;
+          }
+        });
+        state.pack!.settings.placeholders = newPlaceholders;
         persistPack();
         renderWorkbench();
         toast('设置已保存');
@@ -1694,7 +2069,7 @@
         const blob = new Blob([ta?.value || text], { type: 'application/json;charset=utf-8' });
         const a = pD.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = `快速情节编排_导出_${Date.now()}.json`;
+        a.download = `快速回复管理器_导出_${Date.now()}.json`;
         a.click();
         URL.revokeObjectURL(a.href);
       };
@@ -1706,12 +2081,127 @@
   function renderPreview(previewEl: HTMLElement): void {
     previewEl.innerHTML = '';
     const tokens = state.pack?.uiState?.preview?.tokens || [];
-    for (const t of tokens) {
+    
+    tokens.forEach((t, index) => {
       const chip = pD.createElement('span');
       chip.className = `fp-token ${t.type || 'raw'}`;
-      chip.textContent = t.label || '';
+      chip.draggable = true;
+      chip.dataset.tokenIndex = String(index);
+      
+      // 标签文字
+      const labelSpan = pD.createElement('span');
+      labelSpan.textContent = t.label || '';
+      chip.appendChild(labelSpan);
+      
+      // 删除按钮
+      const del = pD.createElement('span');
+      del.className = 'fp-token-del';
+      del.innerHTML = '✕';
+      del.title = '删除';
+      del.onclick = (e) => {
+        e.stopPropagation();
+        if (!state.pack) return;
+        state.pack.uiState.preview.tokens.splice(index, 1);
+        persistPack();
+        refreshPreviewPanel();
+      };
+      chip.appendChild(del);
+      
+      // PC 拖拽排序
+      chip.addEventListener('dragstart', (e) => {
+        chip.classList.add('dragging');
+        e.dataTransfer!.effectAllowed = 'move';
+        e.dataTransfer!.setData('text/plain', String(index));
+      });
+      chip.addEventListener('dragend', () => {
+        chip.classList.remove('dragging');
+      });
+      chip.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        chip.classList.add('drag-over');
+      });
+      chip.addEventListener('dragleave', () => {
+        chip.classList.remove('drag-over');
+      });
+      chip.addEventListener('drop', (e) => {
+        e.preventDefault();
+        chip.classList.remove('drag-over');
+        const fromIndex = parseInt(e.dataTransfer!.getData('text/plain'), 10);
+        const toIndex = index;
+        if (isNaN(fromIndex) || fromIndex === toIndex || !state.pack) return;
+        const arr = state.pack.uiState.preview.tokens;
+        const [moved] = arr.splice(fromIndex, 1);
+        arr.splice(toIndex, 0, moved);
+        persistPack();
+        refreshPreviewPanel();
+      });
+      
+      // 手机端长按拖拽 - 使用 touchstart/touchmove/touchend 模拟
+      let touchStartY = 0;
+      let touchStartX = 0;
+      let touchTimer: ReturnType<typeof setTimeout> | null = null;
+      let isDragging = false;
+      let dragClone: HTMLElement | null = null;
+      
+      chip.addEventListener('touchstart', (e) => {
+        const touch = e.touches[0];
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+        touchTimer = setTimeout(() => {
+          isDragging = true;
+          chip.classList.add('dragging');
+          // 创建拖拽幽灵
+          dragClone = chip.cloneNode(true) as HTMLElement;
+          dragClone.style.cssText = 'position:fixed;z-index:999999;pointer-events:none;opacity:.8;transform:scale(1.05)';
+          dragClone.style.left = `${touch.clientX - 30}px`;
+          dragClone.style.top = `${touch.clientY - 15}px`;
+          pD.body.appendChild(dragClone);
+        }, 400);
+      }, { passive: true });
+      
+      chip.addEventListener('touchmove', (e) => {
+        if (!isDragging) {
+          // 如果移动超过阈值，取消长按
+          const touch = e.touches[0];
+          if (Math.abs(touch.clientX - touchStartX) > 10 || Math.abs(touch.clientY - touchStartY) > 10) {
+            if (touchTimer) { clearTimeout(touchTimer); touchTimer = null; }
+          }
+          return;
+        }
+        e.preventDefault();
+        const touch = e.touches[0];
+        if (dragClone) {
+          dragClone.style.left = `${touch.clientX - 30}px`;
+          dragClone.style.top = `${touch.clientY - 15}px`;
+        }
+      });
+      
+      chip.addEventListener('touchend', (e) => {
+        if (touchTimer) { clearTimeout(touchTimer); touchTimer = null; }
+        if (!isDragging) return;
+        isDragging = false;
+        chip.classList.remove('dragging');
+        if (dragClone) { dragClone.remove(); dragClone = null; }
+        
+        // 查找放置目标
+        const touch = e.changedTouches[0];
+        const target = pD.elementFromPoint(touch.clientX, touch.clientY);
+        const targetChip = target?.closest('.fp-token') as HTMLElement | null;
+        if (targetChip && targetChip !== chip && targetChip.dataset.tokenIndex && state.pack) {
+          const fromIdx = index;
+          const toIdx = parseInt(targetChip.dataset.tokenIndex, 10);
+          if (!isNaN(toIdx) && fromIdx !== toIdx) {
+            const arr = state.pack.uiState.preview.tokens;
+            const [moved] = arr.splice(fromIdx, 1);
+            arr.splice(toIdx, 0, moved);
+            persistPack();
+            refreshPreviewPanel();
+          }
+        }
+      });
+      
       previewEl.appendChild(chip);
-    }
+    });
   }
 
   function openContextMenu(x: number, y: number, item: Item): void {
@@ -1788,6 +2278,51 @@
     if (rect.bottom > vp.height - 6) menu.style.top = `${vp.height - rect.height - 8}px`;
   }
 
+  function showItemSubmenu(item: Item, x: number, y: number): void {
+    closeContextMenu();
+    if (!state.pack) return;
+    const connectors = state.pack.settings.connectors || [];
+    
+    const menu = pD.createElement('div');
+    menu.className = 'fp-menu';
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    
+    // 直接插入
+    const directBtn = pD.createElement('button');
+    directBtn.className = 'fp-menu-btn';
+    directBtn.textContent = '直接插入';
+    directBtn.onclick = () => {
+      runItem(item);
+      menu.remove();
+      state.contextMenu = null;
+    };
+    menu.appendChild(directBtn);
+    
+    // 带连接符插入
+    for (const conn of connectors) {
+      const btn = pD.createElement('button');
+      btn.className = 'fp-menu-btn';
+      btn.textContent = `${conn.label} + 插入`;
+      btn.onclick = () => {
+        addConnector(conn);
+        runItem(item);
+        menu.remove();
+        state.contextMenu = null;
+      };
+      menu.appendChild(btn);
+    }
+    
+    pD.body.appendChild(menu);
+    state.contextMenu = menu;
+    
+    // 边界修正
+    const rect = menu.getBoundingClientRect();
+    const vp = getViewportSize();
+    if (rect.right > vp.width - 6) menu.style.left = `${vp.width - rect.width - 8}px`;
+    if (rect.bottom > vp.height - 6) menu.style.top = `${vp.height - rect.height - 8}px`;
+  }
+
   function renderMain(mainScroll: HTMLElement): void {
     mainScroll.innerHTML = '';
     const groups = groupedItemsForMain();
@@ -1814,15 +2349,23 @@
         const card = pD.createElement('div');
         card.className = 'fp-card';
         card.draggable = true;
+        const excerpt = truncateContent(item.content, 80);
         card.innerHTML = `
           <div class="fp-card-icons">
             <span class="fp-mini ${item.mode === 'inject' ? 'inject' : ''}">${item.mode === 'inject' ? '注入' : '追加'}</span>
             ${item.favorite ? '<span class="fp-mini fav">❤</span>' : ''}
           </div>
           <div class="fp-card-title">${item.name}</div>
+          ${excerpt ? `<div class="fp-card-excerpt">${excerpt}</div>` : ''}
         `;
 
-        card.onclick = () => runItem(item);
+        card.onclick = (e) => {
+          if (item.mode === 'inject') {
+            runItem(item);
+          } else {
+            showItemSubmenu(item, e.clientX, e.clientY);
+          }
+        };
 
         card.oncontextmenu = (e) => {
           e.preventDefault();
@@ -1850,6 +2393,221 @@
 
       mainScroll.appendChild(grid);
     }
+  }
+
+  function renderCompactList(container: HTMLElement): void {
+    container.innerHTML = '';
+    if (!state.pack) return;
+
+    // 搜索框
+    const searchWrap = pD.createElement('div');
+    searchWrap.className = 'fp-compact-search';
+    searchWrap.innerHTML = '<input class="fp-input" placeholder="搜索分类/条目..." />';
+    container.appendChild(searchWrap);
+
+    const searchInput = searchWrap.querySelector('input') as HTMLInputElement;
+    searchInput.value = state.filter || '';
+    searchInput.oninput = () => {
+      state.filter = searchInput.value;
+      // 只刷新列表内容，不重建整个 workbench
+      renderCompactListContent(scrollArea);
+    };
+
+    // 当前分类标题
+    const header = pD.createElement('div');
+    header.className = 'fp-compact-header';
+    if (state.currentCategoryId === '__favorites__') {
+      header.textContent = '❤ 收藏夹';
+    } else {
+      const cat = getCategoryById(state.currentCategoryId);
+      header.textContent = cat ? cat.name : '全部';
+    }
+    container.appendChild(header);
+
+    // 滚动区域
+    const scrollArea = pD.createElement('div');
+    scrollArea.className = 'fp-compact-scroll';
+    container.appendChild(scrollArea);
+
+    renderCompactListContent(scrollArea);
+  }
+
+  function renderCompactListContent(scrollArea: HTMLElement): void {
+    scrollArea.innerHTML = '';
+    if (!state.pack) return;
+
+    const keyword = (state.filter || '').trim().toLowerCase();
+
+    // === 收藏夹视图 ===
+    if (state.currentCategoryId === '__favorites__') {
+      const favs = state.pack.items.filter((i) => i.favorite);
+      const filtered = keyword
+        ? favs.filter((i) => i.name.toLowerCase().includes(keyword) || (i.content || '').toLowerCase().includes(keyword))
+        : favs;
+
+      if (!filtered.length) {
+        scrollArea.innerHTML = '<div style="padding:16px;color:#8a7e72;font-size:13px">暂无收藏条目</div>';
+        return;
+      }
+
+      const btns = pD.createElement('div');
+      btns.className = 'fp-compact-btns';
+      for (const item of filtered) {
+        btns.appendChild(createCompactItemBtn(item));
+      }
+      scrollArea.appendChild(btns);
+      return;
+    }
+
+    // === 正常分类视图 ===
+    const focus = getCategoryById(state.currentCategoryId) || (state.pack.categories.find((c) => c.parentId === null) || null);
+    if (!focus) return;
+
+    const directChildren = treeChildren(focus.id);
+    const ownItems = getItemsByCategory(focus.id, false);
+
+    // 过滤
+    const filteredChildren = keyword
+      ? directChildren.filter((c) => {
+          if (c.name.toLowerCase().includes(keyword)) return true;
+          const items = getItemsByCategory(c.id, true);
+          return items.some((i) => i.name.toLowerCase().includes(keyword) || (i.content || '').toLowerCase().includes(keyword));
+        })
+      : directChildren;
+
+    const filteredItems = keyword
+      ? ownItems.filter((i) => i.name.toLowerCase().includes(keyword) || (i.content || '').toLowerCase().includes(keyword))
+      : ownItems;
+
+    // 收藏夹入口（只在根分类显示）
+    if (!keyword && focus.parentId === null) {
+      const favCount = state.pack.items.filter((i) => i.favorite).length;
+      if (favCount > 0) {
+        const favBtns = pD.createElement('div');
+        favBtns.className = 'fp-compact-btns';
+        const favBtn = pD.createElement('button');
+        favBtn.className = 'fp-cbtn fp-cbtn-fav';
+        favBtn.textContent = `❤ 收藏夹 (${favCount})`;
+        favBtn.onclick = () => {
+          state.history.push(state.currentCategoryId);
+          state.currentCategoryId = '__favorites__';
+          renderWorkbench();
+        };
+        favBtns.appendChild(favBtn);
+        scrollArea.appendChild(favBtns);
+      }
+    }
+
+    // 子分类按钮
+    if (filteredChildren.length) {
+      const label = pD.createElement('div');
+      label.className = 'fp-compact-group-label';
+      label.textContent = '📂 分类';
+      scrollArea.appendChild(label);
+
+      const catBtns = pD.createElement('div');
+      catBtns.className = 'fp-compact-btns';
+      for (const child of filteredChildren) {
+        const btn = pD.createElement('button');
+        btn.className = 'fp-cbtn fp-cbtn-cat';
+        const childItemCount = getItemsByCategory(child.id, true).length;
+        btn.textContent = `${child.name}${childItemCount ? ' (' + childItemCount + ')' : ''}`;
+        btn.onclick = () => {
+          state.history.push(state.currentCategoryId);
+          state.currentCategoryId = child.id;
+          renderWorkbench();
+        };
+        catBtns.appendChild(btn);
+      }
+      scrollArea.appendChild(catBtns);
+    }
+
+    // 分隔线
+    if (filteredChildren.length && filteredItems.length) {
+      const sep = pD.createElement('div');
+      sep.className = 'fp-compact-sep';
+      scrollArea.appendChild(sep);
+    }
+
+    // 条目按钮
+    if (filteredItems.length) {
+      const label = pD.createElement('div');
+      label.className = 'fp-compact-group-label';
+      label.textContent = '📝 条目';
+      scrollArea.appendChild(label);
+
+      const itemBtns = pD.createElement('div');
+      itemBtns.className = 'fp-compact-btns';
+      for (const item of filteredItems) {
+        itemBtns.appendChild(createCompactItemBtn(item));
+      }
+      scrollArea.appendChild(itemBtns);
+    }
+
+    // 如果子分类没有直接条目，也展示子分类内的条目（按子分类分组）
+    if (!filteredItems.length && filteredChildren.length) {
+      for (const child of filteredChildren) {
+        const childItems = getItemsByCategory(child.id, true);
+        const filtered2 = keyword
+          ? childItems.filter((i) => i.name.toLowerCase().includes(keyword) || (i.content || '').toLowerCase().includes(keyword))
+          : childItems;
+        if (filtered2.length) {
+          const sep2 = pD.createElement('div');
+          sep2.className = 'fp-compact-sep';
+          scrollArea.appendChild(sep2);
+
+          const label2 = pD.createElement('div');
+          label2.className = 'fp-compact-group-label';
+          label2.textContent = child.name;
+          scrollArea.appendChild(label2);
+
+          const btns2 = pD.createElement('div');
+          btns2.className = 'fp-compact-btns';
+          for (const item of filtered2) {
+            btns2.appendChild(createCompactItemBtn(item));
+          }
+          scrollArea.appendChild(btns2);
+        }
+      }
+    }
+
+    // 空状态
+    if (!filteredChildren.length && !filteredItems.length) {
+      scrollArea.innerHTML = '<div style="padding:16px;color:#8a7e72;font-size:13px">当前分类暂无内容</div>';
+    }
+  }
+
+  function createCompactItemBtn(item: Item): HTMLButtonElement {
+    const btn = pD.createElement('button');
+    btn.className = `fp-cbtn${item.mode === 'inject' ? ' fp-cbtn-inject' : ''}`;
+    
+    // 结构化内容：名称 + 截断摘要
+    const excerpt = truncateContent(item.content, 40);
+    btn.innerHTML = `<span>${item.name}</span>${excerpt ? `<span class="fp-cbtn-excerpt">${excerpt}</span>` : ''}`;
+    btn.style.cssText = 'display:inline-flex;flex-direction:column;align-items:flex-start;gap:1px';
+    
+    btn.onclick = (e) => {
+      if (item.mode === 'inject') {
+        runItem(item);
+      } else {
+        showItemSubmenu(item, e.clientX, e.clientY);
+      }
+    };
+    btn.oncontextmenu = (e) => {
+      e.preventDefault();
+      openContextMenu(e.clientX, e.clientY, item);
+    };
+    btn.addEventListener('touchstart', (e) => {
+      state.longPressTimer = setTimeout(() => {
+        const touch = e.touches?.[0];
+        if (touch) openContextMenu(touch.clientX, touch.clientY, item);
+      }, 520);
+    }, { passive: true });
+    btn.addEventListener('touchend', () => {
+      if (state.longPressTimer) clearTimeout(state.longPressTimer);
+      state.longPressTimer = null;
+    });
+    return btn;
   }
 
   function enableResizers(panel: HTMLElement, sidebar: HTMLElement, splitV: HTMLElement, bottom: HTMLElement, splitH: HTMLElement): void {
@@ -1906,6 +2664,7 @@
     if (!panel || !state.pack) return;
     panel.innerHTML = '';
     panel.setAttribute('data-theme', (state.pack.settings.ui && state.pack.settings.ui.theme) || 'herdi-light');
+    applyCustomCSS();
 
     const vp = getViewportSize();
     const vw = vp.width;
@@ -1944,24 +2703,46 @@
 
     const top = pD.createElement('div');
     top.className = 'fp-top';
-    top.innerHTML = `
-      <div class="fp-left">
-        ${renderTopButton({ data: 'back', icon: 'back', label: '返回' })}
-        <span class="fp-title">💌 快速情节编排</span>
-        <div class="fp-quick-actions">
-          ${renderTopButton({ data: 'then', icon: 'then', label: '然后', className: 'fp-btn-then' })}
-          ${renderTopButton({ data: 'simul', icon: 'simul', label: '同时', className: 'fp-btn-simul' })}
+
+    const connectors = state.pack.settings.connectors || [];
+    const connectorBtnsHtml = connectors.map((c, i) => 
+      renderTopButton({ data: `conn-${i}`, icon: i === 0 ? 'then' : (i === 1 ? 'simul' : 'add'), label: c.label, className: `fp-btn fp-conn-${c.color}` })
+    ).join('');
+
+    if (compact) {
+      top.innerHTML = `
+        <div class="fp-left">
+          ${renderTopButton({ data: 'back', icon: 'back', label: '返回' })}
+          <div class="fp-quick-actions">
+            ${connectorBtnsHtml}
+          </div>
         </div>
-      </div>
-      <div class="fp-right">
-        ${renderTopButton({ data: 'new-cat', icon: 'folder', label: '新分类' })}
-        ${renderTopButton({ data: 'new-item', icon: 'add', label: '新增条目' })}
-        ${renderTopButton({ data: 'export', icon: 'download', iconOnly: true, title: '导出' })}
-        ${renderTopButton({ data: 'import', icon: 'upload', iconOnly: true, title: '导入' })}
-        ${renderTopButton({ data: 'settings', icon: 'settings', iconOnly: true, title: '设置' })}
-        ${renderTopButton({ data: 'close', icon: 'close', iconOnly: true, title: '关闭' })}
-      </div>
-    `;
+        <div class="fp-right">
+          ${renderTopButton({ data: 'new-cat', icon: 'folder', iconOnly: true, title: '新分类' })}
+          ${renderTopButton({ data: 'new-item', icon: 'add', iconOnly: true, title: '新增条目' })}
+          ${renderTopButton({ data: 'settings', icon: 'settings', iconOnly: true, title: '设置' })}
+          ${renderTopButton({ data: 'close', icon: 'close', iconOnly: true, title: '关闭' })}
+        </div>
+      `;
+    } else {
+      top.innerHTML = `
+        <div class="fp-left">
+          ${renderTopButton({ data: 'back', icon: 'back', label: '返回' })}
+          <span class="fp-title">💌 快速回复管理器</span>
+          <div class="fp-quick-actions">
+            ${connectorBtnsHtml}
+          </div>
+        </div>
+        <div class="fp-right">
+          ${renderTopButton({ data: 'new-cat', icon: 'folder', label: '新分类' })}
+          ${renderTopButton({ data: 'new-item', icon: 'add', label: '新增条目' })}
+          ${renderTopButton({ data: 'export', icon: 'download', iconOnly: true, title: '导出' })}
+          ${renderTopButton({ data: 'import', icon: 'upload', iconOnly: true, title: '导入' })}
+          ${renderTopButton({ data: 'settings', icon: 'settings', iconOnly: true, title: '设置' })}
+          ${renderTopButton({ data: 'close', icon: 'close', iconOnly: true, title: '关闭' })}
+        </div>
+      `;
+    }
 
     const path = pD.createElement('div');
     path.className = 'fp-path';
@@ -1969,78 +2750,127 @@
     const body = pD.createElement('div');
     body.className = 'fp-body';
 
-    const sidebar = pD.createElement('div');
-    sidebar.className = 'fp-sidebar';
-    sidebar.style.width = compact ? '100%' : `${state.pack.uiState.sidebar.width || 280}px`;
+    // 用于存储非 compact 模式下的元素引用
+    let bottomHead: HTMLElement | null = null;
+    let previewExpanded = false;
 
-    const sideHead = pD.createElement('div');
-    sideHead.className = 'fp-side-head';
-    sideHead.innerHTML = '<input class="fp-input" placeholder="筛选分类/条目" />';
+    if (compact) {
+      // ===== 紧凑按钮列表模式 =====
+      const compactList = pD.createElement('div');
+      compactList.className = 'fp-compact-list';
+      body.appendChild(compactList);
 
-    const tree = pD.createElement('div');
-    tree.className = 'fp-tree';
+      panel.appendChild(top);
+      panel.appendChild(path);
+      panel.appendChild(body);
 
-    sidebar.appendChild(sideHead);
-    sidebar.appendChild(tree);
+      // 紧凑模式预览区
+      const compactBottom = pD.createElement('div');
+      compactBottom.className = 'fp-bottom fp-compact-bottom';
+      previewExpanded = state.pack.uiState.preview.expanded !== false;
+      if (!previewExpanded) compactBottom.classList.add('collapsed');
 
-    const splitV = pD.createElement('div');
-    splitV.className = 'fp-split-v';
+      const compactBottomHead = pD.createElement('div');
+      compactBottomHead.className = 'fp-bottom-head';
+      compactBottomHead.innerHTML = '<span>预览令牌流</span><button class="fp-btn icon-only" data-toggle-preview title="收起/展开">' + iconSvg(previewExpanded ? 'chevron-down' : 'chevron-up') + '</button>';
 
-    const main = pD.createElement('div');
-    main.className = 'fp-main';
+      const compactPreview = pD.createElement('div');
+      compactPreview.className = 'fp-preview';
 
-    const mainScroll = pD.createElement('div');
-    mainScroll.className = 'fp-main-scroll';
+      compactBottom.appendChild(compactBottomHead);
+      compactBottom.appendChild(compactPreview);
+      panel.appendChild(compactBottom);
 
-    const splitH = pD.createElement('div');
-    splitH.className = 'fp-split-h';
+      renderPath(path);
+      renderCompactList(compactList);
+      renderPreview(compactPreview);
 
-    const bottom = pD.createElement('div');
-    bottom.className = 'fp-bottom';
-    bottom.style.height = `${state.pack.uiState.preview.height || 140}px`;
-    const previewExpanded = compact ? false : state.pack.uiState.preview.expanded !== false;
-    if (!previewExpanded) {
-      bottom.classList.add('collapsed');
-      splitH.style.display = 'none';
+      // 紧凑模式的 toggleBtn 事件
+      const compactToggleBtn = compactBottomHead.querySelector('[data-toggle-preview]') as HTMLElement | null;
+      if (compactToggleBtn) {
+        compactToggleBtn.onclick = () => {
+          if (!state.pack) return;
+          state.pack.uiState.preview.expanded = !(state.pack.uiState.preview.expanded !== false);
+          persistPack();
+          renderWorkbench();
+        };
+      }
+    } else {
+      // ===== 原有桌面分栏模式 =====
+      const sidebar = pD.createElement('div');
+      sidebar.className = 'fp-sidebar';
+      sidebar.style.width = `${state.pack.uiState.sidebar.width || 280}px`;
+
+      const sideHead = pD.createElement('div');
+      sideHead.className = 'fp-side-head';
+      sideHead.innerHTML = '<input class="fp-input" placeholder="筛选分类/条目" />';
+
+      const tree = pD.createElement('div');
+      tree.className = 'fp-tree';
+
+      sidebar.appendChild(sideHead);
+      sidebar.appendChild(tree);
+
+      const splitV = pD.createElement('div');
+      splitV.className = 'fp-split-v';
+
+      const main = pD.createElement('div');
+      main.className = 'fp-main';
+
+      const mainScroll = pD.createElement('div');
+      mainScroll.className = 'fp-main-scroll';
+
+      const splitH = pD.createElement('div');
+      splitH.className = 'fp-split-h';
+
+      const bottom = pD.createElement('div');
+      bottom.className = 'fp-bottom';
+      bottom.style.height = `${state.pack.uiState.preview.height || 140}px`;
+      previewExpanded = state.pack.uiState.preview.expanded !== false;
+      if (!previewExpanded) {
+        bottom.classList.add('collapsed');
+        splitH.style.display = 'none';
+      }
+
+      bottomHead = pD.createElement('div');
+      bottomHead.className = 'fp-bottom-head';
+      bottomHead.innerHTML = '<span>预览令牌流</span><button class="fp-btn icon-only" data-toggle-preview title="收起/展开">' + iconSvg(previewExpanded ? 'chevron-down' : 'chevron-up') + '</button>';
+
+      const preview = pD.createElement('div');
+      preview.className = 'fp-preview';
+
+      bottom.appendChild(bottomHead);
+      bottom.appendChild(preview);
+
+      main.appendChild(mainScroll);
+      main.appendChild(splitH);
+      main.appendChild(bottom);
+
+      body.appendChild(sidebar);
+      body.appendChild(splitV);
+      body.appendChild(main);
+
+      panel.appendChild(top);
+      panel.appendChild(path);
+      panel.appendChild(body);
+
+      renderPath(path);
+      renderTree(tree, renderWorkbench);
+      renderMain(mainScroll);
+      renderPreview(preview);
+      enableResizers(panel, sidebar, splitV, bottom, splitH);
+
+      const searchInput = sideHead.querySelector('input') as HTMLInputElement | null;
+      if (searchInput) {
+        searchInput.value = state.filter;
+        searchInput.oninput = () => {
+          state.filter = searchInput.value;
+          renderWorkbench();
+        };
+      }
     }
 
-    const bottomHead = pD.createElement('div');
-    bottomHead.className = 'fp-bottom-head';
-    bottomHead.innerHTML = '<span>预览令牌流（条目名 / 同时 / 然后）</span><button class="fp-btn" data-toggle-preview>收起</button>';
-
-    const preview = pD.createElement('div');
-    preview.className = 'fp-preview';
-
-    bottom.appendChild(bottomHead);
-    bottom.appendChild(preview);
-
-    main.appendChild(mainScroll);
-    main.appendChild(splitH);
-    main.appendChild(bottom);
-
-    body.appendChild(sidebar);
-    body.appendChild(splitV);
-    body.appendChild(main);
-
-    panel.appendChild(top);
-    panel.appendChild(path);
-    panel.appendChild(body);
-
-    renderPath(path);
-    renderTree(tree, renderWorkbench);
-    renderMain(mainScroll);
-    renderPreview(preview);
-    enableResizers(panel, sidebar, splitV, bottom, splitH);
-
-    const searchInput = sideHead.querySelector('input') as HTMLInputElement | null;
-    if (searchInput) {
-      searchInput.value = state.filter;
-      searchInput.oninput = () => {
-        state.filter = searchInput.value;
-        renderWorkbench();
-      };
-    }
-
+    // === 顶栏事件绑定（compact 和非 compact 都需要）===
     (top.querySelector('[data-back]') as HTMLElement | null)!.onclick = () => {
       if (state.currentCategoryId === '__favorites__') {
         const firstRoot = state.pack?.categories
@@ -2058,11 +2888,16 @@
         renderWorkbench();
       }
     };
-    (top.querySelector('[data-then]') as HTMLElement | null)!.onclick = () => addConnector('then');
-    (top.querySelector('[data-simul]') as HTMLElement | null)!.onclick = () => addConnector('simultaneous');
+    connectors.forEach((conn, i) => {
+      const el = top.querySelector(`[data-conn-${i}]`) as HTMLElement | null;
+      if (el) el.onclick = () => addConnector(conn);
+    });
     (top.querySelector('[data-settings]') as HTMLElement | null)!.onclick = openSettingsModal;
-    (top.querySelector('[data-import]') as HTMLElement | null)!.onclick = openImportModal;
-    (top.querySelector('[data-export]') as HTMLElement | null)!.onclick = openExportModal;
+    // import/export 按钮只在非 compact 模式下存在
+    const importBtn = top.querySelector('[data-import]') as HTMLElement | null;
+    if (importBtn) importBtn.onclick = openImportModal;
+    const exportBtn = top.querySelector('[data-export]') as HTMLElement | null;
+    if (exportBtn) exportBtn.onclick = openExportModal;
     (top.querySelector('[data-close]') as HTMLElement | null)!.onclick = closeWorkbench;
 
     (top.querySelector('[data-new-item]') as HTMLElement | null)!.onclick = () => openEditItemModal(null);
@@ -2085,15 +2920,18 @@
       toast('分类已创建');
     };
 
-    const toggleBtn = bottomHead.querySelector('[data-toggle-preview]') as HTMLElement | null;
-    if (toggleBtn) {
-      toggleBtn.textContent = previewExpanded ? '收起' : '展开';
-      toggleBtn.onclick = () => {
-        if (!state.pack) return;
-        state.pack.uiState.preview.expanded = !(state.pack.uiState.preview.expanded !== false);
-        persistPack();
-        renderWorkbench();
-      };
+    // toggleBtn 只在非 compact 模式下存在
+    if (bottomHead) {
+      const toggleBtn = bottomHead.querySelector('[data-toggle-preview]') as HTMLElement | null;
+      if (toggleBtn) {
+        toggleBtn.innerHTML = iconSvg(previewExpanded ? 'chevron-down' : 'chevron-up');
+        toggleBtn.onclick = () => {
+          if (!state.pack) return;
+          state.pack.uiState.preview.expanded = !(state.pack.uiState.preview.expanded !== false);
+          persistPack();
+          renderWorkbench();
+        };
+      }
     }
   }
 
@@ -2107,6 +2945,7 @@
   function openWorkbench() {
     closeWorkbench();
     ensureStyle();
+    applyCustomCSS();
 
     const overlay = pD.createElement('div');
     overlay.id = OVERLAY_ID;
@@ -2196,21 +3035,21 @@
         }
       }
     } catch (e) {
-      console.error('[快速情节编排] 按钮注册失败', e);
+      console.error('[快速回复管理器] 按钮注册失败', e);
     }
 
     try {
       const ev = getButtonEvent(BUTTON_LABEL);
       eventOn(ev, openWorkbench);
     } catch (e) {
-      console.error('[快速情节编排] 事件监听失败', e);
+      console.error('[快速回复管理器] 事件监听失败', e);
     }
 
     pD.addEventListener('click', (e) => {
       if (state.contextMenu && !(e.target as HTMLElement).closest('.fp-menu')) closeContextMenu();
     });
 
-    console.log('[快速情节编排] 已加载');
+    console.log('[快速回复管理器] 已加载');
   }
 
   bootstrap();

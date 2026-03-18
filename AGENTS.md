@@ -12,8 +12,8 @@ CLAUDE.md
    }
    ```
 2. 实时修改脚本配置文件中的 URL 必须使用 `127.0.0.1`（不能用 `localhost`），否则会触发 CORS 跨域错误
-   - 正确：`"content": "import 'http://127.0.0.1:5500/dist/快速情节编排/index.js'"`
-   - 错误：`"content": "import 'http://localhost:5500/dist/快速情节编排/index.js'"`
+   - 正确：`"content": "import 'http://127.0.0.1:5500/dist/快速回复管理器/index.js'"`
+   - 错误：`"content": "import 'http://localhost:5500/dist/快速回复管理器/index.js'"`
 
 ### 启动流程
 1. `pnpm watch`（首次需先 `pnpm install`）

@@ -1,0 +1,7 @@
+{
+    "id": "fast-plot-dev",
+    "name": "💌快速回复管理器(开发版)",
+    "content": "import 'http://127.0.0.1:5500/dist/快速回复管理器/index.js'",
+    "info": "实时开发版本，修改源码后自动更新",
+    "buttons": []
+}
