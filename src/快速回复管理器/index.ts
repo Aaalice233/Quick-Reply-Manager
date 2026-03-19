@@ -181,9 +181,15 @@
       lastDraftBeforeGenerate: string;
       lastGeneratedText: string;
       status: string;
+      requestSeq: number;
+      activeRequestId: number;
     };
     debugLogs: string[];
     debugHooksBound: boolean;
+    debugErrorHandler: ((ev: Event) => void) | null;
+    debugRejectionHandler: ((ev: Event) => void) | null;
+    storageLoadHadCorruption: boolean;
+    lastLoadedPackUpdatedAt: string;
   }
 
   function resolveHostWindow(): Window {
@@ -232,17 +238,142 @@
       lastDraftBeforeGenerate: '',
       lastGeneratedText: '',
       status: '',
+      requestSeq: 0,
+      activeRequestId: 0,
     },
     debugLogs: [],
     debugHooksBound: false,
+    debugErrorHandler: null,
+    debugRejectionHandler: null,
+    storageLoadHadCorruption: false,
+    lastLoadedPackUpdatedAt: '',
   };
 
   function uid(prefix: string): string {
     return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
   }
 
+  const PERSIST_DEBOUNCE_MS = 260;
+  const FETCH_TIMEOUT_MS = 20000;
+  const RUNTIME_KEY = '__QRM_RUNTIME_V2__';
+  let persistTimer: ReturnType<typeof setTimeout> | null = null;
+  let colorPickerGlobalBound = false;
+
   function deepClone<T>(v: T): T {
     return JSON.parse(JSON.stringify(v));
+  }
+
+  function escapeHtml(value: unknown): string {
+    const raw = String(value ?? '');
+    return raw
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function getInputValueTrim(root: ParentNode, selector: string): string {
+    const el = root.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | null;
+    return String(el?.value || '').trim();
+  }
+
+  function asDomElement(target: unknown): Element | null {
+    if (!target || typeof target !== 'object') return null;
+    const node = target as { nodeType?: unknown; closest?: unknown };
+    if (node.nodeType !== 1 || typeof node.closest !== 'function') return null;
+    return target as Element;
+  }
+
+  async function copyTextRobust(text: string): Promise<void> {
+    const value = String(text || '');
+    try {
+      if (pW.navigator?.clipboard?.writeText) {
+        await pW.navigator.clipboard.writeText(value);
+        return;
+      }
+    } catch (e) {}
+    const ta = pD.createElement('textarea');
+    ta.value = value;
+    ta.setAttribute('readonly', 'true');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    ta.style.top = '0';
+    ta.style.opacity = '0';
+    pD.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    let ok = false;
+    try {
+      ok = pD.execCommand('copy');
+    } catch (e) {
+      ok = false;
+    } finally {
+      ta.remove();
+    }
+    if (!ok) throw new Error('copy_failed');
+  }
+
+  function invalidateEditGeneration(shouldAbort = true): void {
+    if (shouldAbort) {
+      try { state.editGenerateState.abortController?.abort(); } catch (e) {}
+    }
+    state.editGenerateState.isGenerating = false;
+    state.editGenerateState.abortController = null;
+    state.editGenerateState.lastDraftBeforeGenerate = '';
+    state.editGenerateState.lastGeneratedText = '';
+    state.editGenerateState.activeRequestId = ++state.editGenerateState.requestSeq;
+  }
+
+  function validateApiUrlOrThrow(input: string): string {
+    const raw = String(input || '').trim();
+    if (!raw) throw new Error('请先填写API URL');
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch (e) {
+      throw new Error('API URL 格式不合法');
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('API URL 仅支持 http/https 协议');
+    }
+    return parsed.toString();
+  }
+
+  function mergeAbortSignals(parentSignal: AbortSignal | null | undefined, timeoutMs: number): { signal: AbortSignal; cleanup: () => void } {
+    const timeoutCtrl = new AbortController();
+    const tid = setTimeout(() => timeoutCtrl.abort(new Error(`请求超时（>${timeoutMs}ms）`)), timeoutMs);
+    const merged = new AbortController();
+    let parentAbortHandler: (() => void) | null = null;
+    let timeoutAbortHandler: (() => void) | null = null;
+    const forwardAbort = (reason: unknown) => {
+      try { merged.abort(reason); } catch (e) {}
+    };
+    if (parentSignal) {
+      if (parentSignal.aborted) {
+        forwardAbort(parentSignal.reason);
+      } else {
+        parentAbortHandler = () => forwardAbort(parentSignal.reason);
+        parentSignal.addEventListener('abort', parentAbortHandler, { once: true });
+      }
+    }
+    timeoutAbortHandler = () => forwardAbort(timeoutCtrl.signal.reason);
+    timeoutCtrl.signal.addEventListener('abort', timeoutAbortHandler, { once: true });
+    const cleanup = () => {
+      clearTimeout(tid);
+      if (parentSignal && parentAbortHandler) parentSignal.removeEventListener('abort', parentAbortHandler);
+      if (timeoutAbortHandler) timeoutCtrl.signal.removeEventListener('abort', timeoutAbortHandler);
+    };
+    return { signal: merged.signal, cleanup };
+  }
+
+  async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+    const merged = mergeAbortSignals(init?.signal, timeoutMs);
+    try {
+      return await fetch(input, { ...init, signal: merged.signal });
+    } finally {
+      merged.cleanup();
+    }
   }
 
   function nowIso() {
@@ -335,42 +466,114 @@
     return null;
   }
 
-  function getScriptStoreRaw() {
-    try {
-      if (typeof getVariables === 'function') {
-        const vars = getVariables({ type: 'script' }) || {};
-        if (vars && typeof vars[STORE_KEY] === 'object') return vars[STORE_KEY];
-      }
-    } catch (e) {}
-    try {
-      const fallback = pW.localStorage.getItem(`__${STORE_KEY}__`);
-      return fallback ? JSON.parse(fallback) : null;
-    } catch (e) {
-      return null;
-    }
+  interface ScriptStoreReadResult {
+    pack: Pack | null;
+    hasStoredValue: boolean;
+    parseFailed: boolean;
+    source: 'script' | 'local' | null;
   }
 
-  function saveScriptStoreRaw(data: Pack): void {
+  function parsePackUpdatedAtMs(pack: unknown): number {
+    const ts = String((pack as { meta?: { updatedAt?: string; createdAt?: string } } | null | undefined)?.meta?.updatedAt
+      || (pack as { meta?: { updatedAt?: string; createdAt?: string } } | null | undefined)?.meta?.createdAt
+      || '').trim();
+    if (!ts) return 0;
+    const ms = Date.parse(ts);
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  function getScriptStoreRaw(): ScriptStoreReadResult {
+    let hasStoredValue = false;
+    let parseFailed = false;
+    let scriptCandidate: Pack | null = null;
+    let localCandidate: Pack | null = null;
+    try {
+      if (typeof getVariables === 'function') {
+        const vars = (getVariables({ type: 'script' }) || {}) as Record<string, unknown>;
+        if (vars && Object.prototype.hasOwnProperty.call(vars, STORE_KEY)) {
+          hasStoredValue = true;
+          const raw = vars[STORE_KEY];
+          if (raw && typeof raw === 'object') {
+            scriptCandidate = raw as Pack;
+          } else if (typeof raw === 'string' && String(raw).trim()) {
+            try {
+              const parsed = JSON.parse(raw);
+              if (parsed && typeof parsed === 'object') scriptCandidate = parsed as Pack;
+              else parseFailed = true;
+            } catch (e) {
+              parseFailed = true;
+            }
+          } else if (raw !== undefined && raw !== null) {
+            parseFailed = true;
+          }
+        }
+      }
+    } catch (e) {
+      parseFailed = true;
+      logError('读取脚本变量存储失败', String(e));
+    }
+    try {
+      const fallback = pW.localStorage.getItem(`__${STORE_KEY}__`);
+      if (fallback !== null) {
+        hasStoredValue = true;
+        if (String(fallback).trim()) {
+          try {
+            const parsed = JSON.parse(fallback);
+            if (parsed && typeof parsed === 'object') localCandidate = parsed as Pack;
+            else parseFailed = true;
+          } catch (e) {
+            parseFailed = true;
+            logError('读取本地存储失败(JSON解析)', String(e));
+          }
+        } else {
+          parseFailed = true;
+        }
+      }
+    } catch (e) {
+      parseFailed = true;
+      logError('读取本地存储失败', String(e));
+    }
+    if (scriptCandidate && localCandidate) {
+      const scriptMs = parsePackUpdatedAtMs(scriptCandidate);
+      const localMs = parsePackUpdatedAtMs(localCandidate);
+      const pickScript = scriptMs >= localMs;
+      return {
+        pack: pickScript ? scriptCandidate : localCandidate,
+        hasStoredValue,
+        parseFailed,
+        source: pickScript ? 'script' : 'local',
+      };
+    }
+    if (scriptCandidate) return { pack: scriptCandidate, hasStoredValue, parseFailed, source: 'script' };
+    if (localCandidate) return { pack: localCandidate, hasStoredValue, parseFailed, source: 'local' };
+    return { pack: null, hasStoredValue, parseFailed, source: null };
+  }
+
+  function saveScriptStoreRaw(data: Pack): boolean {
+    let anySaved = false;
     try {
       if (typeof insertOrAssignVariables === 'function') {
         insertOrAssignVariables({ [STORE_KEY]: data }, { type: 'script' });
-        return;
-      }
-      if (typeof updateVariablesWith === 'function') {
+        anySaved = true;
+      } else if (typeof updateVariablesWith === 'function') {
         updateVariablesWith((vars) => {
           vars[STORE_KEY] = data;
           return vars;
         }, { type: 'script' });
-        return;
+        anySaved = true;
       }
-    } catch (e) {}
+    } catch (e) {
+      logError('写入脚本变量存储失败', String(e));
+    }
 
     try {
       pW.localStorage.setItem(`__${STORE_KEY}__`, JSON.stringify(data));
+      anySaved = true;
     } catch (e) {
       console.error('[快速回复管理器] 保存失败', e);
       logError('保存脚本存储失败', String(e));
     }
+    return anySaved;
   }
 
   function buildDefaultQrLlmPresetStore(): QrLlmPresetStore {
@@ -611,12 +814,6 @@
       safe.presets[DEFAULT_QR_LLM_PRESET_NAME] = deepClone(def);
     } else {
       const def = buildDefaultQrLlmPresetStore().presets[DEFAULT_QR_LLM_PRESET_NAME];
-      const current = safe.presets[DEFAULT_QR_LLM_PRESET_NAME];
-      const currentGroups = normalizePromptGroup(current.promptGroup);
-      const looksLegacyDefault = currentGroups.some((x) => String(x.name || x.note || '').trim() === '系统规则');
-      if (looksLegacyDefault) {
-        safe.presets[DEFAULT_QR_LLM_PRESET_NAME] = deepClone(def);
-      }
       const migrated = safe.presets[DEFAULT_QR_LLM_PRESET_NAME];
       if (!normalizePromptGroup(migrated.promptGroup).length) {
         safe.presets[DEFAULT_QR_LLM_PRESET_NAME].promptGroup = deepClone(def.promptGroup);
@@ -634,9 +831,9 @@
     return {
       enabledStream: true,
       generationParams: {
-        temperature: 0.9,
+        temperature: 1,
         top_p: 1,
-        max_tokens: 1024,
+        max_tokens: 8192,
         presence_penalty: 0,
         frequency_penalty: 0,
       },
@@ -663,18 +860,78 @@
     };
   }
 
-  function loadQrLlmSecretConfig(): QrLlmSecretConfig {
+  function readQrLlmSecretFromScriptVariables(): QrLlmSecretConfig | null {
     try {
-      const raw = pW.localStorage.getItem(`__${QR_LLM_SECRET_KEY}__`);
-      const parsed = raw ? JSON.parse(raw) : null;
-      const normalized = normalizeQrLlmSecret(parsed);
-      state.qrLlmSecretCache = normalized;
-      return normalized;
+      if (typeof getVariables !== 'function') return null;
+      const vars = (getVariables({ type: 'script' }) || {}) as Record<string, unknown>;
+      if (!Object.prototype.hasOwnProperty.call(vars, QR_LLM_SECRET_KEY)) return null;
+      const raw = vars[QR_LLM_SECRET_KEY];
+      if (raw && typeof raw === 'object') return normalizeQrLlmSecret(raw);
+      if (typeof raw === 'string' && String(raw).trim()) {
+        try {
+          return normalizeQrLlmSecret(JSON.parse(raw));
+        } catch (e) {
+          logError('读取LLM私密配置失败(script/json)', String(e));
+          return null;
+        }
+      }
     } catch (e) {
-      const normalized = normalizeQrLlmSecret(null);
-      state.qrLlmSecretCache = normalized;
-      return normalized;
+      logError('读取LLM私密配置失败(script)', String(e));
     }
+    return null;
+  }
+
+  function writeQrLlmSecretToScriptVariables(secret: QrLlmSecretConfig): boolean {
+    try {
+      if (typeof insertOrAssignVariables === 'function') {
+        insertOrAssignVariables({ [QR_LLM_SECRET_KEY]: secret }, { type: 'script' });
+        return true;
+      }
+      if (typeof updateVariablesWith === 'function') {
+        updateVariablesWith((vars) => {
+          vars[QR_LLM_SECRET_KEY] = secret;
+          return vars;
+        }, { type: 'script' });
+        return true;
+      }
+    } catch (e) {
+      logError('写入LLM私密配置失败(script)', String(e));
+    }
+    return false;
+  }
+
+  function loadQrLlmSecretConfig(): QrLlmSecretConfig {
+    const readRaw = (storage: Storage): string | null => {
+      try {
+        return storage.getItem(`__${QR_LLM_SECRET_KEY}__`);
+      } catch (e) {
+        return null;
+      }
+    };
+    const parseRaw = (raw: string | null, source: string): QrLlmSecretConfig | null => {
+      if (!raw || !String(raw).trim()) return null;
+      try {
+        return normalizeQrLlmSecret(JSON.parse(raw));
+      } catch (e) {
+        logError(`读取LLM私密配置失败(${source})`, String(e));
+        return null;
+      }
+    };
+
+    const scriptHit = readQrLlmSecretFromScriptVariables();
+    const localHit = parseRaw(readRaw(pW.localStorage), 'localStorage');
+    const sessionHit = parseRaw(readRaw(pW.sessionStorage), 'sessionStorage');
+    const normalized = scriptHit || localHit || sessionHit || normalizeQrLlmSecret(null);
+    state.qrLlmSecretCache = normalized;
+    if (!scriptHit && (localHit || sessionHit)) {
+      // Migrate legacy browser storage secret into SillyTavern script variables.
+      writeQrLlmSecretToScriptVariables(normalized);
+    }
+    if (scriptHit || localHit || sessionHit) {
+      try { pW.localStorage.setItem(`__${QR_LLM_SECRET_KEY}__`, JSON.stringify(normalized)); } catch (e) {}
+      try { pW.sessionStorage.setItem(`__${QR_LLM_SECRET_KEY}__`, JSON.stringify(normalized)); } catch (e) {}
+    }
+    return normalized;
   }
 
   function getQrLlmSecretConfig(): QrLlmSecretConfig {
@@ -682,15 +939,25 @@
     return normalizeQrLlmSecret(state.qrLlmSecretCache);
   }
 
-  function saveQrLlmSecretConfig(secret: QrLlmSecretConfig): void {
+  function saveQrLlmSecretConfig(secret: QrLlmSecretConfig): boolean {
     const normalized = normalizeQrLlmSecret(secret);
     state.qrLlmSecretCache = normalized;
+    let anySaved = false;
+    if (writeQrLlmSecretToScriptVariables(normalized)) anySaved = true;
     try {
       pW.localStorage.setItem(`__${QR_LLM_SECRET_KEY}__`, JSON.stringify(normalized));
+      anySaved = true;
+    } catch (e) {
+      logError('写入LLM私密配置(localStorage)失败', String(e));
+    }
+    try {
+      pW.sessionStorage.setItem(`__${QR_LLM_SECRET_KEY}__`, JSON.stringify(normalized));
+      anySaved = true;
     } catch (e) {
       console.error('[快速回复管理器] 保存LLM私密配置失败', e);
       logError('保存LLM私密配置失败', String(e));
     }
+    return anySaved;
   }
 
   function normalizePack(pack: unknown): Pack {
@@ -775,9 +1042,9 @@
     safe.settings!.qrLlm = safe.settings!.qrLlm || getDefaultQrLlmSettings();
     if (typeof safe.settings!.qrLlm.enabledStream !== 'boolean') safe.settings!.qrLlm.enabledStream = true;
     safe.settings!.qrLlm.generationParams = safe.settings!.qrLlm.generationParams || getDefaultQrLlmSettings().generationParams;
-    safe.settings!.qrLlm.generationParams.temperature = Number.isFinite(Number(safe.settings!.qrLlm.generationParams.temperature)) ? Number(safe.settings!.qrLlm.generationParams.temperature) : 0.9;
+    safe.settings!.qrLlm.generationParams.temperature = Number.isFinite(Number(safe.settings!.qrLlm.generationParams.temperature)) ? Number(safe.settings!.qrLlm.generationParams.temperature) : 1;
     safe.settings!.qrLlm.generationParams.top_p = Number.isFinite(Number(safe.settings!.qrLlm.generationParams.top_p)) ? Number(safe.settings!.qrLlm.generationParams.top_p) : 1;
-    safe.settings!.qrLlm.generationParams.max_tokens = Number.isFinite(Number(safe.settings!.qrLlm.generationParams.max_tokens)) ? Number(safe.settings!.qrLlm.generationParams.max_tokens) : 1024;
+    safe.settings!.qrLlm.generationParams.max_tokens = Number.isFinite(Number(safe.settings!.qrLlm.generationParams.max_tokens)) ? Number(safe.settings!.qrLlm.generationParams.max_tokens) : 8192;
     safe.settings!.qrLlm.generationParams.presence_penalty = Number.isFinite(Number(safe.settings!.qrLlm.generationParams.presence_penalty)) ? Number(safe.settings!.qrLlm.generationParams.presence_penalty) : 0;
     safe.settings!.qrLlm.generationParams.frequency_penalty = Number.isFinite(Number(safe.settings!.qrLlm.generationParams.frequency_penalty)) ? Number(safe.settings!.qrLlm.generationParams.frequency_penalty) : 0;
     safe.settings!.qrLlm.presetStore = normalizeQrLlmPresetStore(
@@ -965,21 +1232,62 @@
 
   function loadPack() {
     const existed = getScriptStoreRaw();
-    if (!existed) {
+    if (!existed.pack) {
+      if (existed.hasStoredValue && existed.parseFailed) {
+        state.storageLoadHadCorruption = true;
+        logError('检测到存储损坏，已跳过自动覆盖，使用默认数据启动');
+        const def = buildDefaultPack();
+        state.lastLoadedPackUpdatedAt = String(def.meta.updatedAt || '');
+        return def;
+      }
       const def = buildDefaultPack();
       saveScriptStoreRaw(def);
+      state.lastLoadedPackUpdatedAt = String(def.meta.updatedAt || '');
       return def;
     }
-    const normalized = normalizePack(existed);
+    const normalized = normalizePack(existed.pack);
     saveScriptStoreRaw(normalized);
+    state.lastLoadedPackUpdatedAt = String(normalized.meta.updatedAt || '');
     return normalized;
   }
 
-  function persistPack() {
+  function persistPackNow() {
     if (!state.pack) return;
+    const latest = getScriptStoreRaw();
+    if (latest.pack) {
+      const latestMs = parsePackUpdatedAtMs(latest.pack);
+      const knownMs = Number.isFinite(Date.parse(state.lastLoadedPackUpdatedAt)) ? Date.parse(state.lastLoadedPackUpdatedAt) : 0;
+      const currentMs = parsePackUpdatedAtMs(state.pack);
+      if (latestMs > knownMs && latestMs > currentMs) {
+        logError('检测到跨实例数据更新，已跳过本次自动保存以避免覆盖较新数据');
+        return;
+      }
+    }
     state.pack.meta.updatedAt = nowIso();
     state.pack.favorites = state.pack.items.filter((i) => i.favorite).map((i) => i.id);
-    saveScriptStoreRaw(state.pack);
+    const saved = saveScriptStoreRaw(state.pack);
+    if (saved) state.lastLoadedPackUpdatedAt = String(state.pack.meta.updatedAt || '');
+  }
+
+  function flushPersistPack(): void {
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    persistPackNow();
+  }
+
+  function persistPack(opts?: { immediate?: boolean }) {
+    if (!state.pack) return;
+    if (opts?.immediate) {
+      flushPersistPack();
+      return;
+    }
+    if (persistTimer) clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      persistPackNow();
+    }, PERSIST_DEBOUNCE_MS);
   }
 
   function ensureStyle() {
@@ -1353,7 +1661,7 @@ body {
 .fp-qr-seg-ops .fp-btn .fp-ico{margin-right:0;width:13px;height:13px}
 .fp-qr-drag-handle{cursor:grab}
 .fp-qr-drag-handle:active{cursor:grabbing}
-.fp-debug-console{width:100%;min-height:420px;max-height:62vh;background:#07090d!important;color:#8dfc9b!important;border:1px solid #1c232e!important;border-radius:12px!important;padding:12px!important;font:12px/1.55 "Cascadia Mono","Consolas","Courier New",monospace;white-space:pre-wrap;word-break:break-word;overflow:auto;box-shadow:inset 0 0 0 1px rgba(255,255,255,.02)}
+.fp-debug-console{width:100%;min-height:220px;background:#07090d!important;color:#8dfc9b!important;border:1px solid #1c232e!important;border-radius:12px!important;padding:12px!important;font:12px/1.55 "Cascadia Mono","Consolas","Courier New",monospace;white-space:pre-wrap;word-break:break-word;overflow:auto;box-shadow:inset 0 0 0 1px rgba(255,255,255,.02)}
 .fp-debug-console::selection{background:rgba(141,252,155,.25);color:#eaffee}
 .fp-debug-console{user-select:text;cursor:text}
 .fp-preview-ta{padding:12px 14px!important;border-radius:12px!important;border:1px solid color-mix(in srgb,var(--qr-btn-border) 82%, #fff 18%)!important;background:color-mix(in srgb,var(--qr-bg-input) 86%, #fff 14%)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.35), inset 0 -1px 0 rgba(0,0,0,.04);line-height:1.55;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--qr-accent) 42%, #9aa4b2 58%) transparent}
@@ -1405,9 +1713,11 @@ body {
 .fp-settings-tab:hover{background:var(--qr-bg-hover)}
 .fp-settings-tab.active{background:color-mix(in srgb,var(--qr-bg-hover) 80%, var(--qr-accent) 20%);color:var(--qr-text-1);box-shadow:inset 2px 0 0 var(--qr-accent)}
 .fp-settings-tab .fp-ico,.fp-settings-tab .fp-tab-ico{width:14px;height:14px;flex:none;opacity:.9}
-.fp-settings-body{min-width:0;min-height:0;overflow-y:auto;padding-right:4px;padding-bottom:2px;scrollbar-gutter:stable}
-.fp-tab{display:none}
-.fp-tab.active{display:block}
+.fp-settings-body{min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.fp-tab{display:none;min-height:0;height:100%;overflow-y:auto;padding-right:4px;padding-bottom:2px;scrollbar-gutter:stable}
+.fp-tab.active{display:flex;flex-direction:column;min-height:0}
+.fp-tab-debug{overflow:hidden;padding-right:0}
+.fp-tab-debug .fp-debug-console{flex:1;min-height:0;height:100%;max-height:none}
 .fp-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
 .fp-row > label{width:98px;font-size:12px;color:var(--qr-row-label)}
 .fp-row > input,.fp-row > textarea,.fp-row > select{flex:1;padding:9px 14px;border-radius:var(--qr-control-radius);border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023)}
@@ -1436,15 +1746,36 @@ body {
 .fp-cat-picker-trigger:hover{border-color:var(--qr-btn-hover-border);background:var(--qr-btn-hover-bg)}
 .fp-cat-picker-trigger .fp-ico{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:12px;height:12px;opacity:.72;margin-right:0}
 .fp-cat-picker.open .fp-cat-picker-trigger{border-color:var(--qr-accent);box-shadow:var(--qr-control-focus-shadow)}
-.fp-cat-picker-panel{position:absolute;left:0;right:0;top:calc(100% + 6px);display:none;z-index:90;border:1px solid var(--qr-menu-border);border-radius:12px;background:var(--qr-menu-bg);box-shadow:0 12px 28px rgba(0,0,0,.24);padding:8px}
+.fp-cat-picker-panel{position:absolute;left:0;right:0;top:calc(100% + 6px);display:none;z-index:90;border:1px solid var(--qr-menu-border);border-radius:12px;background:var(--qr-menu-bg);box-shadow:0 12px 28px rgba(0,0,0,.24);padding:8px;overflow:hidden}
 .fp-cat-picker.open .fp-cat-picker-panel{display:block}
 .fp-cat-picker.open-up .fp-cat-picker-panel{top:auto;bottom:calc(100% + 6px)}
+.fp-cat-picker-panel.fp-cat-picker-panel-portal{position:fixed;left:12px;right:auto;top:12px;bottom:auto;z-index:2147483650}
+.fp-cat-picker-sheet-head{display:none;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.fp-cat-picker-sheet-title{font-size:13px;font-weight:800;color:var(--qr-text-1)}
+.fp-cat-picker-sheet-close{border:none;background:transparent;color:var(--qr-text-2);cursor:pointer;border-radius:8px;padding:4px;line-height:1}
+.fp-cat-picker-sheet-close:hover{background:var(--qr-menu-hover);color:var(--qr-text-1)}
 .fp-cat-picker-search{width:100%;margin-bottom:8px}
-.fp-cat-picker-list{max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:4px}
+.fp-cat-picker-list{max-height:220px;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:4px}
 .fp-cat-opt{width:100%;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--qr-text-1);padding:7px 9px;text-align:left;cursor:pointer;font-size:12px;line-height:1.35}
 .fp-cat-opt:hover{background:var(--qr-menu-hover)}
 .fp-cat-opt.active{border-color:var(--qr-accent);background:color-mix(in srgb,var(--qr-menu-hover) 72%, var(--qr-accent) 28%)}
 .fp-cat-empty{padding:8px 10px;color:var(--qr-text-2);font-size:12px}
+.fp-cat-picker-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.34);backdrop-filter:blur(1px);z-index:89}
+.fp-cat-picker.sheet-mode .fp-cat-picker-panel{
+  position:fixed;
+  left:12px;
+  right:12px;
+  top:auto;
+  bottom:12px;
+  border-radius:16px;
+  padding:10px;
+  z-index:90;
+  max-height:min(78vh,640px);
+  display:flex;
+  flex-direction:column;
+}
+.fp-cat-picker.sheet-mode .fp-cat-picker-sheet-head{display:flex}
+.fp-cat-picker.sheet-mode.open-up .fp-cat-picker-panel{top:auto;bottom:12px}
 .fp-multi-picker{position:relative;flex:1;min-width:0}
 .fp-multi-trigger{width:100%;min-height:36px;padding:6px 30px 6px 10px;border:1px solid var(--qr-btn-border);border-radius:10px;background:var(--qr-bg-input);color:var(--qr-text-1);text-align:left;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;font-size:12px;line-height:1.35}
 .fp-multi-trigger:hover{border-color:var(--qr-btn-hover-border);background:var(--qr-btn-hover-bg)}
@@ -1480,6 +1811,19 @@ body {
 .fp-actions button.primary{background:var(--qr-accent);border-color:var(--qr-accent);color:var(--qr-text-on-accent)}
 .fp-actions button.danger{background:#a83d3d;border-color:#b64646;color:#fff5f5}
 .fp-actions button.danger:hover{background:#b64646;border-color:#c95656}
+.fp-move-item-card{width:min(680px,95vw);min-height:0;max-height:min(86vh,700px);overflow:visible}
+.fp-move-body{display:flex;flex-direction:column;gap:10px}
+.fp-move-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.fp-move-meta-item{display:flex;flex-direction:column;gap:4px;padding:9px 10px;border-radius:10px;border:1px solid var(--qr-border-2);background:color-mix(in srgb,var(--qr-bg-input) 72%, var(--qr-bg-3) 28%)}
+.fp-move-meta-label{font-size:11px;font-weight:700;color:var(--qr-text-2)}
+.fp-move-meta-value{font-size:12px;font-weight:700;color:var(--qr-text-1);line-height:1.35;word-break:break-word}
+.fp-move-meta-value.is-placeholder{color:var(--qr-text-2);font-weight:600}
+.fp-move-note{font-size:12px;color:var(--qr-text-2);margin-top:-2px}
+.fp-move-item-card .fp-actions{margin-top:2px}
+@media (max-width:760px){
+  .fp-move-item-card{width:min(96vw,640px)}
+  .fp-move-meta{grid-template-columns:1fr}
+}
 .fp-toggle{display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
 .fp-toggle input[type="checkbox"]{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
 .fp-toggle-track{position:relative;display:inline-flex;align-items:center;width:42px;height:24px;border-radius:999px;background:rgba(127,127,137,.35);border:1px solid var(--qr-btn-border);transition:background .18s ease,border-color .18s ease,box-shadow .18s ease}
@@ -2373,7 +2717,23 @@ body {
     if (hdr) {
       cloned.custom_include_headers = hdr.replace(/(Authorization:\s*Bearer\s+).+/i, '$1***');
     }
+    if (Array.isArray(cloned.messages)) {
+      cloned.messages = cloned.messages.map((msg) => {
+        const role = String((msg as { role?: string }).role || '');
+        const content = String((msg as { content?: string }).content || '');
+        return { role, contentPreview: `${content.slice(0, 24)}${content.length > 24 ? '…' : ''}`, contentLength: content.length };
+      });
+    }
     return cloned;
+  }
+
+  function summarizeLlmOutputForLog(text: string): { preview: string; length: number } {
+    const raw = String(text || '');
+    const compact = raw.replace(/\s+/g, ' ').trim();
+    return {
+      preview: compact.slice(0, 180) + (compact.length > 180 ? '…' : ''),
+      length: compact.length,
+    };
   }
 
   function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -2487,6 +2847,18 @@ body {
     const fromText = first?.text;
     const fromDelta = first?.delta?.content;
     if (typeof fromMessage === 'string') return fromMessage;
+    if (Array.isArray(fromMessage)) {
+      const chunks = fromMessage
+        .map((seg) => {
+          if (!seg || typeof seg !== 'object') return '';
+          const txt = (seg as { text?: unknown }).text;
+          if (typeof txt === 'string') return txt;
+          const content = (seg as { content?: unknown }).content;
+          return typeof content === 'string' ? content : '';
+        })
+        .filter(Boolean);
+      if (chunks.length) return chunks.join('');
+    }
     if (typeof fromText === 'string') return fromText;
     if (typeof fromDelta === 'string') return fromDelta;
     if (typeof anyData.content === 'string') return anyData.content;
@@ -2517,7 +2889,7 @@ body {
       url: modelsUrl,
       headers: { ...headers, Authorization: apiKey ? 'Bearer ***' : '' },
     });
-    const res = await fetch(modelsUrl, { method: 'GET', headers });
+    const res = await fetchWithTimeout(modelsUrl, { method: 'GET', headers });
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
       throw new Error(`${res.status} ${res.statusText}${detail ? ` (${detail.slice(0, 120)})` : ''}`);
@@ -2532,8 +2904,7 @@ body {
   }
 
   async function fetchQrLlmModels(secret: QrLlmSecretConfig): Promise<string[]> {
-    const url = String(secret.url || '').trim();
-    if (!url) throw new Error('请先填写API URL');
+    const url = validateApiUrlOrThrow(secret.url || '');
     const candidates = buildApiBaseCandidates(url);
     const errors: string[] = [];
 
@@ -2547,7 +2918,7 @@ body {
       };
       pushDebugLog('实际API请求 /api/backends/chat-completions/status', sanitizeLlmReqBodyForLog(body));
       try {
-        const res = await fetch('/api/backends/chat-completions/status', {
+        const res = await fetchWithTimeout('/api/backends/chat-completions/status', {
           method: 'POST',
           headers: { ...getRequestHeadersSafe(), 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
@@ -2597,7 +2968,7 @@ body {
   ): Promise<string> {
     const secret = opts.secretOverride || getQrLlmSecretConfig();
     const model = String(opts.model || secret.manualModelId || secret.model || '').trim();
-    if (!secret.url) throw new Error('API URL 未配置');
+    const validatedUrl = validateApiUrlOrThrow(secret.url || '');
     if (!model) throw new Error('模型ID未配置');
     let extraBodyParams: Record<string, unknown> = {};
     try {
@@ -2606,7 +2977,7 @@ body {
       pushDebugLog('附加参数解析失败，已忽略本次附加参数', e instanceof Error ? e.message : String(e));
       extraBodyParams = {};
     }
-    const candidates = buildApiBaseCandidates(secret.url);
+    const candidates = buildApiBaseCandidates(validatedUrl);
     const errors: string[] = [];
 
     for (const apiBase of candidates) {
@@ -2628,7 +2999,7 @@ body {
       pushDebugLog('实际API请求 /api/backends/chat-completions/generate', sanitizeLlmReqBodyForLog(reqBody));
 
       try {
-        const res = await fetch('/api/backends/chat-completions/generate', {
+        const res = await fetchWithTimeout('/api/backends/chat-completions/generate', {
           method: 'POST',
           headers: { ...getRequestHeadersSafe(), 'Content-Type': 'application/json' },
           body: JSON.stringify(reqBody),
@@ -2651,7 +3022,7 @@ body {
           const data = await res.json();
           const text = extractContentFromGenerateJson(data);
           if (!text) throw new Error('响应中未找到可用文本');
-          pushDebugLog('AI返回（非流式）', text);
+          pushDebugLog('AI返回（非流式）', summarizeLlmOutputForLog(text));
           return text;
         }
 
@@ -2692,7 +3063,7 @@ body {
         }
 
         if (out) {
-          pushDebugLog('AI返回（流式）', out);
+          pushDebugLog('AI返回（流式）', summarizeLlmOutputForLog(out));
           return out;
         }
         const tail = `${buffer}${decoder.decode()}`.trim();
@@ -2701,11 +3072,11 @@ body {
             const parsed = JSON.parse(tail);
             const text = extractContentFromGenerateJson(parsed);
             if (text) {
-              pushDebugLog('AI返回（流式尾包）', text);
+              pushDebugLog('AI返回（流式尾包）', summarizeLlmOutputForLog(text));
               return text;
             }
           } catch (e) {}
-          pushDebugLog('AI返回（流式尾包原文）', tail);
+          pushDebugLog('AI返回（流式尾包原文）', summarizeLlmOutputForLog(tail));
           return tail;
         }
         throw new Error('流式响应为空');
@@ -2733,12 +3104,12 @@ body {
       pushDebugLog('实际API请求 直连 /v1/chat/completions', {
         url: directUrl,
         headers: { Authorization: secret.apiKey ? 'Bearer ***' : '' },
-        body: directBody,
+        body: sanitizeLlmReqBodyForLog(directBody),
       });
       try {
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (secret.apiKey) headers.Authorization = `Bearer ${secret.apiKey}`;
-        const res = await fetch(directUrl, {
+        const res = await fetchWithTimeout(directUrl, {
           method: 'POST',
           headers,
           body: JSON.stringify(directBody),
@@ -2761,7 +3132,7 @@ body {
           const data = await res.json();
           const text = extractContentFromGenerateJson(data);
           if (!text) throw new Error('响应中未找到可用文本');
-          pushDebugLog('AI返回（直连非流式）', text);
+          pushDebugLog('AI返回（直连非流式）', summarizeLlmOutputForLog(text));
           return text;
         }
 
@@ -2800,7 +3171,7 @@ body {
         }
 
         if (out) {
-          pushDebugLog('AI返回（直连流式）', out);
+          pushDebugLog('AI返回（直连流式）', summarizeLlmOutputForLog(out));
           return out;
         }
         const tail = `${buffer}${decoder.decode()}`.trim();
@@ -2809,11 +3180,11 @@ body {
             const parsed = JSON.parse(tail);
             const text = extractContentFromGenerateJson(parsed);
             if (text) {
-              pushDebugLog('AI返回（直连流式尾包）', text);
+              pushDebugLog('AI返回（直连流式尾包）', summarizeLlmOutputForLog(text));
               return text;
             }
           } catch (e) {}
-          pushDebugLog('AI返回（直连流式尾包原文）', tail);
+          pushDebugLog('AI返回（直连流式尾包原文）', summarizeLlmOutputForLog(tail));
           return tail;
         }
         throw new Error('流式响应为空');
@@ -2850,7 +3221,7 @@ body {
     );
     const normalized = String(text || '').trim().toLowerCase();
     if (normalized === 'ok' || normalized.startsWith('ok')) return 'ok';
-    return normalized.slice(0, 20) || 'ok';
+    throw new Error(`测试返回非ok: ${normalized.slice(0, 30) || 'empty'}`);
   }
 
   async function generateQrExpandedContent(
@@ -3032,7 +3403,9 @@ body {
         ], { once: true });
         return true;
       }
-    } catch (e) {}
+    } catch (e) {
+      logError('injectPrompts 注入失败', String(e));
+    }
 
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -3042,7 +3415,9 @@ body {
         await ctx.executeSlashCommandsWithOptions(`/inject id=${uid('inj')} "${safe}"`);
         return true;
       }
-    } catch (e) {}
+    } catch (e) {
+      logError('Slash 注入失败', String(e));
+    }
 
     toast(`注入失败: ${itemName}`);
     return false;
@@ -3131,7 +3506,13 @@ body {
     if (!state.pack) return;
     pathEl.innerHTML = '';
     const nodes = getPath(state.currentCategoryId);
-    state.pack.uiState.lastPath = nodes.map((n) => n.id);
+    const nextPath = nodes.map((n) => n.id);
+    const prevPath = Array.isArray(state.pack.uiState.lastPath) ? state.pack.uiState.lastPath : [];
+    const pathChanged = nextPath.length !== prevPath.length || nextPath.some((id, idx) => prevPath[idx] !== id);
+    if (pathChanged) {
+      state.pack.uiState.lastPath = nextPath;
+      persistPack();
+    }
     
     if (!nodes.length) {
       pathEl.textContent = '未选择分类';
@@ -3350,8 +3731,19 @@ body {
       node.dataset.catId = cat.id;
       const kids = treeChildren(cat.id);
       const isOpen = expanded[cat.id] !== false;
-      const indent = '<span class="fp-tree-indent"></span>'.repeat(depth);
-      node.innerHTML = `${indent}<span>${kids.length ? (isOpen ? '▾' : '▸') : '·'}</span><span>${cat.name}</span>`;
+      const indentWrap = pD.createElement('span');
+      for (let i = 0; i < depth; i++) {
+        const indentEl = pD.createElement('span');
+        indentEl.className = 'fp-tree-indent';
+        indentWrap.appendChild(indentEl);
+      }
+      const arrow = pD.createElement('span');
+      arrow.textContent = kids.length ? (isOpen ? '▾' : '▸') : '·';
+      const label = pD.createElement('span');
+      label.textContent = cat.name;
+      node.appendChild(indentWrap);
+      node.appendChild(arrow);
+      node.appendChild(label);
 
       node.onclick = (e) => {
         if (isClickSuppressed()) {
@@ -3433,10 +3825,16 @@ body {
     if (!overlay) return;
     const replace = opts?.replace !== false;
     let container = overlay.querySelector('.fp-modal') as HTMLElement | null;
-    if (replace && container) container.remove();
+    if (replace && container) {
+      invalidateEditGeneration(true);
+      container.remove();
+    }
     container = pD.createElement('div');
     container.className = 'fp-modal';
-    container.appendChild(contentFactory(() => container!.remove()));
+    container.appendChild(contentFactory(() => {
+      invalidateEditGeneration(true);
+      container?.remove();
+    }));
     overlay.appendChild(container);
   }
 
@@ -3485,7 +3883,9 @@ body {
       const btn = pD.createElement('button');
       btn.type = 'button';
       btn.className = 'fp-ph-chip';
-      btn.innerHTML = `<b>@${entry.key}</b>`;
+      const strong = pD.createElement('b');
+      strong.textContent = `@${entry.key}`;
+      btn.appendChild(strong);
       btn.title = `插入 {@${entry.key}:${entry.value}}`;
       btn.onclick = (e) => {
         e.preventDefault();
@@ -3542,7 +3942,14 @@ body {
 
   function mountCategorySearchableSelect(
     card: HTMLElement,
-    opts: { pickerSelector: string; valueSelector: string; selectedId: string | null; placeholder?: string; searchPlaceholder?: string }
+    opts: {
+      pickerSelector: string;
+      valueSelector: string;
+      selectedId: string | null;
+      placeholder?: string;
+      searchPlaceholder?: string;
+      onChange?: (value: { id: string; fullPath: string; name: string } | null) => void;
+    }
   ): void {
     const host = card.querySelector(opts.pickerSelector) as HTMLElement | null;
     const valueInput = card.querySelector(opts.valueSelector) as HTMLInputElement | null;
@@ -3556,6 +3963,10 @@ body {
     host.innerHTML = `
       <button type="button" class="fp-cat-picker-trigger">${opts.placeholder || '选择分类'}${iconSvg('chevron-down')}</button>
       <div class="fp-cat-picker-panel">
+        <div class="fp-cat-picker-sheet-head">
+          <div class="fp-cat-picker-sheet-title">${opts.placeholder || '选择分类'}</div>
+          <button type="button" class="fp-cat-picker-sheet-close" aria-label="关闭">${iconSvg('close')}</button>
+        </div>
         <input class="fp-cat-picker-search" placeholder="${opts.searchPlaceholder || '搜索分类（支持模糊匹配）...'}" />
         <div class="fp-cat-picker-list"></div>
       </div>
@@ -3563,18 +3974,139 @@ body {
 
     const trigger = host.querySelector('.fp-cat-picker-trigger') as HTMLButtonElement;
     const panel = host.querySelector('.fp-cat-picker-panel') as HTMLElement;
+    const closeBtn = host.querySelector('.fp-cat-picker-sheet-close') as HTMLButtonElement | null;
     const search = host.querySelector('.fp-cat-picker-search') as HTMLInputElement;
     const list = host.querySelector('.fp-cat-picker-list') as HTMLElement;
+    const modalRoot = pD.getElementById(OVERLAY_ID) || pD.body;
+    const backdrop = pD.createElement('div');
+    backdrop.className = 'fp-cat-picker-backdrop';
+    let panelPortaled = false;
+    let viewportHandlersBound = false;
+    let outsideHandlersBound = false;
 
-    const close = () => host.classList.remove('open');
+    const isSheetMode = () => {
+      try { return pW.matchMedia('(max-width: 760px)').matches; } catch (e) { return false; }
+    };
+
+    const restorePanelHome = () => {
+      if (!panelPortaled) return;
+      panelPortaled = false;
+      panel.classList.remove('fp-cat-picker-panel-portal');
+      panel.style.left = '';
+      panel.style.right = '';
+      panel.style.top = '';
+      panel.style.bottom = '';
+      panel.style.width = '';
+      if (!host.contains(panel)) host.appendChild(panel);
+    };
+    const placePortalPanel = () => {
+      const rect = trigger.getBoundingClientRect();
+      const vpW = pW.innerWidth || 0;
+      const vpH = pW.innerHeight || 0;
+      const panelNeed = Math.min(300, (allRows.length || 1) * 32 + 56);
+      const spaceBelow = vpH - rect.bottom;
+      const spaceAbove = rect.top;
+      const openUp = spaceBelow < panelNeed && spaceAbove > spaceBelow;
+      host.classList.toggle('open-up', openUp);
+      const usableSpace = Math.max(160, (openUp ? spaceAbove : spaceBelow) - 20);
+      const listMaxHeight = Math.max(128, Math.min(360, usableSpace - 76));
+      list.style.maxHeight = `${listMaxHeight}px`;
+
+      const width = Math.max(220, Math.min(rect.width, vpW - 16));
+      const left = Math.max(8, Math.min(rect.left, vpW - width - 8));
+      panel.style.width = `${Math.round(width)}px`;
+      panel.style.left = `${Math.round(left)}px`;
+      panel.style.right = 'auto';
+      if (openUp) {
+        panel.style.top = 'auto';
+        panel.style.bottom = `${Math.max(8, Math.round(vpH - rect.top + 6))}px`;
+      } else {
+        panel.style.bottom = 'auto';
+        panel.style.top = `${Math.max(8, Math.round(rect.bottom + 6))}px`;
+      }
+    };
+    const onViewportChange = () => {
+      if (!host.classList.contains('open') || host.classList.contains('sheet-mode')) return;
+      if (!host.isConnected) {
+        close();
+        return;
+      }
+      placePortalPanel();
+    };
+    const bindViewportHandlers = () => {
+      if (viewportHandlersBound) return;
+      viewportHandlersBound = true;
+      pW.addEventListener('resize', onViewportChange);
+      pW.addEventListener('scroll', onViewportChange, true);
+    };
+    const unbindViewportHandlers = () => {
+      if (!viewportHandlersBound) return;
+      viewportHandlersBound = false;
+      pW.removeEventListener('resize', onViewportChange);
+      pW.removeEventListener('scroll', onViewportChange, true);
+    };
+    const onOutsidePointer = (e: Event) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (host.contains(target) || panel.contains(target) || backdrop.contains(target)) return;
+      close();
+    };
+    const bindOutsideHandlers = () => {
+      if (outsideHandlersBound) return;
+      outsideHandlersBound = true;
+      pD.addEventListener('mousedown', onOutsidePointer, true);
+      pD.addEventListener('touchstart', onOutsidePointer, true);
+    };
+    const unbindOutsideHandlers = () => {
+      if (!outsideHandlersBound) return;
+      outsideHandlersBound = false;
+      pD.removeEventListener('mousedown', onOutsidePointer, true);
+      pD.removeEventListener('touchstart', onOutsidePointer, true);
+    };
+
+    const close = () => {
+      host.classList.remove('open');
+      host.classList.remove('open-up');
+      host.classList.remove('sheet-mode');
+      panel.style.display = 'none';
+      if (backdrop.isConnected) backdrop.remove();
+      unbindViewportHandlers();
+      unbindOutsideHandlers();
+      restorePanelHome();
+    };
     const open = () => {
-      pD.querySelectorAll('.fp-cat-picker.open').forEach((el) => el.classList.remove('open'));
+      pD.querySelectorAll('.fp-cat-picker.open').forEach((el) => {
+        if (el === host) return;
+        el.dispatchEvent(new Event('fp-picker-force-close'));
+        el.classList.remove('open');
+      });
       const rect = trigger.getBoundingClientRect();
       const panelNeed = Math.min(280, (allRows.length || 1) * 32 + 56);
       const spaceBelow = (pW.innerHeight || 0) - rect.bottom;
       const spaceAbove = rect.top;
-      host.classList.toggle('open-up', spaceBelow < panelNeed && spaceAbove > spaceBelow);
+      const sheet = isSheetMode();
+      host.classList.toggle('sheet-mode', sheet);
+      const openUp = !sheet && spaceBelow < panelNeed && spaceAbove > spaceBelow;
+      host.classList.toggle('open-up', openUp);
+      if (sheet) {
+        restorePanelHome();
+        const usableSpace = Math.max(240, (pW.innerHeight || 0) * 0.78);
+        const listMaxHeight = Math.max(180, Math.min(420, usableSpace - 132));
+        list.style.maxHeight = `${listMaxHeight}px`;
+        if (!backdrop.isConnected) modalRoot.appendChild(backdrop);
+      } else {
+        if (backdrop.isConnected) backdrop.remove();
+        if (!panelPortaled) {
+          panelPortaled = true;
+          panel.classList.add('fp-cat-picker-panel-portal');
+          modalRoot.appendChild(panel);
+        }
+        placePortalPanel();
+        bindViewportHandlers();
+      }
       host.classList.add('open');
+      panel.style.display = 'block';
+      bindOutsideHandlers();
       search.focus();
       search.select();
     };
@@ -3582,6 +4114,7 @@ body {
       const selected = allRows.find((x) => x.id === selectedId);
       trigger.firstChild && (trigger.firstChild.textContent = selected?.fullPath || opts.placeholder || '选择分类');
       valueInput.value = selectedId;
+      if (opts.onChange) opts.onChange(selected || null);
     };
 
     const render = () => {
@@ -3615,6 +4148,12 @@ body {
       if (host.classList.contains('open')) close();
       else open();
     };
+    if (closeBtn) closeBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    };
+    backdrop.onclick = () => close();
     search.oninput = render;
     search.onkeydown = (e) => {
       if (e.key === 'Escape') {
@@ -3622,9 +4161,10 @@ body {
         close();
       }
     };
+    host.addEventListener('fp-picker-force-close', () => close());
     host.addEventListener('focusout', (e) => {
       const next = e.relatedTarget as Node | null;
-      if (next && host.contains(next)) return;
+      if (next && (host.contains(next) || panel.contains(next))) return;
       close();
     });
     panel.onclick = (e) => e.stopPropagation();
@@ -3708,9 +4248,18 @@ body {
       toggleMenu();
     };
 
-    pD.addEventListener('click', (e) => {
-      if (!root.contains(e.target as Node)) closeMenu();
-    });
+    if (!colorPickerGlobalBound) {
+      colorPickerGlobalBound = true;
+      pD.addEventListener('click', (e) => {
+        const target = asDomElement(e.target);
+        if (!target) return;
+        const holder = target.closest('.fp-color-picker');
+        pD.querySelectorAll('.fp-color-picker.open').forEach((el) => {
+          if (holder && el === holder) return;
+          el.classList.remove('open');
+        });
+      });
+    }
 
     return root;
   }
@@ -3835,7 +4384,7 @@ body {
               <div class="fp-row"><label>Toast堆叠上限</label><input data-toast-max type="number" min="1" max="8" value="${Number(toastSettings.maxStack || 4)}" /></div>
               <div class="fp-row"><label>Toast时长(ms)</label><input data-toast-timeout type="number" min="600" max="8000" step="100" value="${Number(toastSettings.timeout || 1800)}" /></div>
             </div>
-            <div class="fp-tab" data-tab="debug">
+            <div class="fp-tab fp-tab-debug" data-tab="debug">
               <div style="font-size:12px;color:var(--qr-text-2);margin-bottom:8px">实时显示当前脚本日志（包含发送给AI的实际消息内容）</div>
               <div class="fp-row" style="justify-content:flex-end;gap:8px">
                 <button class="fp-btn" data-debug-clear>清空日志</button>
@@ -3876,9 +4425,9 @@ body {
                   </label>
                 </div>
                 <div class="fp-qr-params-grid">
-                  <div class="fp-qr-param-item"><label>temperature</label><input data-qr-temperature type="number" step="0.1" min="0" max="2" value="${Number(localQrLlmSettings.generationParams.temperature ?? 0.9)}" /></div>
+                  <div class="fp-qr-param-item"><label>temperature</label><input data-qr-temperature type="number" step="0.1" min="0" max="2" value="${Number(localQrLlmSettings.generationParams.temperature ?? 1)}" /></div>
                   <div class="fp-qr-param-item"><label>top_p</label><input data-qr-top-p type="number" step="0.05" min="0" max="1" value="${Number(localQrLlmSettings.generationParams.top_p ?? 1)}" /></div>
-                  <div class="fp-qr-param-item"><label>max_tokens</label><input data-qr-max-tokens type="number" step="1" min="16" max="8192" value="${Number(localQrLlmSettings.generationParams.max_tokens ?? 1024)}" /></div>
+                  <div class="fp-qr-param-item"><label>max_tokens</label><input data-qr-max-tokens type="number" step="1" min="16" max="8192" value="${Number(localQrLlmSettings.generationParams.max_tokens ?? 8192)}" /></div>
                   <div class="fp-qr-param-item"><label>presence_penalty</label><input data-qr-presence type="number" step="0.1" min="-2" max="2" value="${Number(localQrLlmSettings.generationParams.presence_penalty ?? 0)}" /></div>
                   <div class="fp-qr-param-item"><label>frequency_penalty</label><input data-qr-frequency type="number" step="0.1" min="-2" max="2" value="${Number(localQrLlmSettings.generationParams.frequency_penalty ?? 0)}" /></div>
                 </div>
@@ -4068,7 +4617,7 @@ body {
               .replace(/\{\{(setvar|addvar)::([^:}]+)::([\s\S]*?)\}\}/gi, (_all, _op, _key, body) => String(body || ''))
               .trim();
 
-          return enabledPrompts.map((p) => {
+          return prompts.map((p) => {
             const rawContent = String(p.content || '');
             const stripped = renderExpandedContent(rawContent);
             const roleUpper = String(p.role || '').toUpperCase();
@@ -4085,9 +4634,9 @@ body {
               injectionOrder: Number(p.injection_order ?? 100),
               marker: Boolean(p.marker),
               forbidOverrides: Boolean(p.forbid_overrides),
-              content: stripped,
+              content: stripped || rawContent,
             };
-          }).filter((x) => String(x.content || '').trim());
+          });
         };
 
         if (!promptGroup.length && Array.isArray(obj.prompts)) {
@@ -4106,7 +4655,7 @@ body {
           }>);
         }
         if (!userPromptTemplate) {
-          userPromptTemplate = String(obj.finalSystemDirective || obj.userTemplate || obj.userPrompt || '').trim();
+          userPromptTemplate = String(obj.userTemplate || obj.userPrompt || '').trim();
         }
         if (!finalSystemDirective) {
           finalSystemDirective = String(obj.finalSystemDirective || obj.finalDirective || '').trim();
@@ -4128,6 +4677,14 @@ body {
       };
 
       const listLocalPresetNames = () => Object.keys(localQrLlmPresetStore.presets || {}).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+      const persistLocalQrLlmPresetChanges = (): void => {
+        localQrLlmSettings.presetStore = normalizeQrLlmPresetStore(localQrLlmPresetStore);
+        if (!localQrLlmSettings.activePresetName || !localQrLlmSettings.presetStore.presets[localQrLlmSettings.activePresetName]) {
+          localQrLlmSettings.activePresetName = DEFAULT_QR_LLM_PRESET_NAME;
+        }
+        state.pack!.settings.qrLlm = deepClone(localQrLlmSettings);
+        persistPack();
+      };
 
       let localPromptGroupDraft: Array<{
         id?: string;
@@ -4233,8 +4790,10 @@ body {
             initContentEl.style.minHeight = '300px';
             initContentEl.style.height = '300px';
           }
-          (segCard.querySelector('[data-close]') as HTMLElement | null)!.onclick = closeSeg;
-          (segCard.querySelector('[data-save]') as HTMLElement | null)!.onclick = () => {
+          const segCloseBtn = segCard.querySelector('[data-close]') as HTMLElement | null;
+          if (segCloseBtn) segCloseBtn.onclick = closeSeg;
+          const segSaveBtn = segCard.querySelector('[data-save]') as HTMLElement | null;
+          if (segSaveBtn) segSaveBtn.onclick = () => {
             const roleEl = segCard.querySelector('[data-seg-role]') as HTMLSelectElement | null;
             const posEl = segCard.querySelector('[data-seg-position]') as HTMLSelectElement | null;
             const enabledEl = segCard.querySelector('[data-seg-enabled]') as HTMLInputElement | null;
@@ -4330,14 +4889,18 @@ body {
               `;
             }).join('');
           }
-          (tf.querySelector('[data-qr-transfer-all]') as HTMLElement | null)!.onclick = () => {
+          const transferAllBtn = tf.querySelector('[data-qr-transfer-all]') as HTMLElement | null;
+          if (transferAllBtn) transferAllBtn.onclick = () => {
             tf.querySelectorAll<HTMLInputElement>('[data-qr-transfer-item]').forEach((el) => { el.checked = true; });
           };
-          (tf.querySelector('[data-qr-transfer-none]') as HTMLElement | null)!.onclick = () => {
+          const transferNoneBtn = tf.querySelector('[data-qr-transfer-none]') as HTMLElement | null;
+          if (transferNoneBtn) transferNoneBtn.onclick = () => {
             tf.querySelectorAll<HTMLInputElement>('[data-qr-transfer-item]').forEach((el) => { el.checked = false; });
           };
-          (tf.querySelector('[data-close]') as HTMLElement | null)!.onclick = closeTransfer;
-          (tf.querySelector('[data-submit]') as HTMLElement | null)!.onclick = () => {
+          const transferCloseBtn = tf.querySelector('[data-close]') as HTMLElement | null;
+          if (transferCloseBtn) transferCloseBtn.onclick = closeTransfer;
+          const transferSubmitBtn = tf.querySelector('[data-submit]') as HTMLElement | null;
+          if (transferSubmitBtn) transferSubmitBtn.onclick = () => {
             const targetName = String((tf.querySelector('[data-qr-transfer-target]') as HTMLSelectElement | null)?.value || '').trim();
             const mode = String((tf.querySelector('[data-qr-transfer-mode]') as HTMLSelectElement | null)?.value || 'copy').trim();
             if (!targetName) {
@@ -4378,9 +4941,17 @@ body {
               sorted.forEach((idx) => {
                 localPromptGroupDraft.splice(idx, 1);
               });
+              localQrLlmPresetStore.presets[fromName] = compileQrLlmPreset({
+                systemPrompt: '',
+                userPromptTemplate: '',
+                promptGroup: localPromptGroupDraft,
+                finalSystemDirective: '',
+                updatedAt: nowIso(),
+              });
               renderPromptGroupEditor();
               compileDraftToFields();
             }
+            persistLocalQrLlmPresetChanges();
             toast(`已${mode === 'move' ? '移动' : '复制'} ${selectedIdx.length} 条到「${targetName}」`);
             closeTransfer();
           };
@@ -4459,17 +5030,27 @@ body {
       if (qrModelManualEl) qrModelManualEl.value = localQrLlmSecret.manualModelId || localQrLlmSecret.model || '';
       renderQrPresetSelect(localQrLlmSettings.activePresetName);
       updateQrApiStatus(localQrLlmSecret.url ? `已设置URL${localQrLlmSecret.model ? `，当前模型：${localQrLlmSecret.model}` : '，未选模型'}` : '待配置');
-      const renderDebugConsole = () => {
+      const isDebugNearBottom = (el: HTMLElement, threshold = 24): boolean => {
+        return (el.scrollHeight - (el.scrollTop + el.clientHeight)) <= threshold;
+      };
+      let debugAutoScroll = true;
+      if (debugConsoleEl) {
+        debugConsoleEl.addEventListener('scroll', () => {
+          debugAutoScroll = isDebugNearBottom(debugConsoleEl);
+        });
+      }
+      const renderDebugConsole = (forceBottom = false) => {
         if (!debugConsoleEl) return;
+        const shouldStickBottom = forceBottom || debugAutoScroll || isDebugNearBottom(debugConsoleEl);
         const text = state.debugLogs.length ? getDebugLogText() : '[暂无日志]';
         debugConsoleEl.textContent = text;
-        debugConsoleEl.scrollTop = debugConsoleEl.scrollHeight;
+        if (shouldStickBottom) debugConsoleEl.scrollTop = debugConsoleEl.scrollHeight;
       };
-      renderDebugConsole();
+      renderDebugConsole(true);
       if (debugClearBtn) {
         debugClearBtn.onclick = () => {
           state.debugLogs = [];
-          renderDebugConsole();
+          renderDebugConsole(true);
           toast('调试日志已清空');
         };
       }
@@ -4481,7 +5062,7 @@ body {
             return;
           }
           try {
-            await pW.navigator.clipboard.writeText(text);
+            await copyTextRobust(text);
             toast('调试日志已复制');
           } catch (e) {
             toast('复制失败，请手动选择复制');
@@ -4626,6 +5207,7 @@ seed: -1`;
           if (!name) return;
           localQrLlmSettings.activePresetName = name;
           loadSelectedPresetToForm(name);
+          persistLocalQrLlmPresetChanges();
         };
       }
       if (qrPromptGroupListEl) {
@@ -4778,6 +5360,7 @@ seed: -1`;
           }
           localQrLlmSettings.activePresetName = name;
           renderQrPresetSelect(name);
+          persistLocalQrLlmPresetChanges();
           toast(`已创建预设：${name}`);
         };
       }
@@ -4796,6 +5379,7 @@ seed: -1`;
           delete localQrLlmPresetStore.presets[selected];
           localQrLlmSettings.activePresetName = DEFAULT_QR_LLM_PRESET_NAME;
           renderQrPresetSelect(DEFAULT_QR_LLM_PRESET_NAME);
+          persistLocalQrLlmPresetChanges();
           toast('预设已删除');
         };
       }
@@ -4812,6 +5396,7 @@ seed: -1`;
           localQrLlmSettings.activePresetName = DEFAULT_QR_LLM_PRESET_NAME;
           renderQrPresetSelect(DEFAULT_QR_LLM_PRESET_NAME);
           loadSelectedPresetToForm(DEFAULT_QR_LLM_PRESET_NAME);
+          persistLocalQrLlmPresetChanges();
           toast('默认预设已重置');
         };
       }
@@ -4838,6 +5423,7 @@ seed: -1`;
           localPromptGroupDraft = normalizePromptGroup(compiled.promptGroup);
           localQrLlmSettings.activePresetName = name;
           renderQrPresetSelect(name);
+          persistLocalQrLlmPresetChanges();
           toast(`预设已保存：${name}`);
         };
       }
@@ -4916,6 +5502,7 @@ seed: -1`;
               localQrLlmSettings.activePresetName = imported[0].name;
               renderQrPresetSelect(imported[0].name);
               loadSelectedPresetToForm(imported[0].name);
+              persistLocalQrLlmPresetChanges();
               toast(`已导入 ${imported.length} 个预设`);
             } catch (err) {
               toast('导入失败：JSON格式错误或结构不支持');
@@ -4935,8 +5522,8 @@ seed: -1`;
           const row = pD.createElement('div');
           row.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:6px';
           row.innerHTML = `
-            <input data-conn-label="${idx}" value="${conn.label}" placeholder="名称" style="width:80px;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px;text-align:center" />
-            <input data-conn-token="${idx}" value="${conn.token}" placeholder="插入内容" style="flex:1;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px" />
+            <input data-conn-label="${idx}" value="${escapeHtml(conn.label)}" placeholder="名称" style="width:80px;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px;text-align:center" />
+            <input data-conn-token="${idx}" value="${escapeHtml(conn.token)}" placeholder="插入内容" style="flex:1;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px" />
             <div data-conn-color-picker="${idx}" style="display:flex;align-items:center"></div>
             <button class="fp-btn icon-only" data-del-conn="${idx}" title="删除" style="padding:4px 8px;font-size:14px;color:#c44">✕</button>
           `;
@@ -4994,9 +5581,9 @@ seed: -1`;
           loadRoleValuesBySelection();
         }
         roleSelectorEl.innerHTML = [
-          `<option value="${ROLE_DEFAULT_OPTION}" ${selectedRoleOption === ROLE_DEFAULT_OPTION ? 'selected' : ''}>默认</option>`,
+          `<option value="${escapeHtml(ROLE_DEFAULT_OPTION)}" ${selectedRoleOption === ROLE_DEFAULT_OPTION ? 'selected' : ''}>默认</option>`,
           ...options.map(({ id, name }) => {
-            return `<option value="${id}" ${selectedRoleOption === id ? 'selected' : ''}>${name}（${id}）</option>`;
+            return `<option value="${escapeHtml(id)}" ${selectedRoleOption === id ? 'selected' : ''}>${escapeHtml(name)}（${escapeHtml(id)}）</option>`;
           }),
         ].join('');
       };
@@ -5085,7 +5672,10 @@ seed: -1`;
           const defaultBtn = pD.createElement('button');
           defaultBtn.type = 'button';
           defaultBtn.className = `fp-multi-opt ${selected.length ? '' : 'active'}`;
-          defaultBtn.innerHTML = `<input type="checkbox" ${selected.length ? '' : 'checked'} /><span>默认值（${defaultValue || '空'}）</span>`;
+          defaultBtn.innerHTML = `<input type="checkbox" ${selected.length ? '' : 'checked'} />`;
+          const defaultSpan = pD.createElement('span');
+          defaultSpan.textContent = `默认值（${defaultValue || '空'}）`;
+          defaultBtn.appendChild(defaultSpan);
           defaultBtn.onclick = () => {
             selected = [];
             setTriggerText();
@@ -5098,7 +5688,10 @@ seed: -1`;
             const btn = pD.createElement('button');
             btn.type = 'button';
             btn.className = `fp-multi-opt ${active ? 'active' : ''}`;
-            btn.innerHTML = `<input type="checkbox" ${active ? 'checked' : ''} /><span>${opt.label}</span>`;
+            btn.innerHTML = `<input type="checkbox" ${active ? 'checked' : ''} />`;
+            const optSpan = pD.createElement('span');
+            optSpan.textContent = opt.label;
+            btn.appendChild(optSpan);
             btn.onclick = () => {
               if (selected.includes(opt.value)) selected = selected.filter((v) => v !== opt.value);
               else selected.push(opt.value);
@@ -5128,7 +5721,7 @@ seed: -1`;
       const renderWorldbookSourceSelector = () => {
         if (!worldbookSelectorEl) return;
         worldbookSelectorEl.innerHTML = [`<option value="" ${!selectedWorldbookName ? 'selected' : ''}>无</option>`, ...allWorldbookNames
-          .map((name) => `<option value="${name}" ${selectedWorldbookName === name ? 'selected' : ''}>${name}</option>`)
+          .map((name) => `<option value="${escapeHtml(name)}" ${selectedWorldbookName === name ? 'selected' : ''}>${escapeHtml(name)}</option>`)
         ].join('');
       };
 
@@ -5181,7 +5774,7 @@ seed: -1`;
           const currentValue = String(localRoleValues[ph.key] || '');
           const defaultValue = String(ph.defaultValue || ph.key || '');
           row.innerHTML = `
-            <input data-cph-key="${idx}" value="${ph.key}" placeholder="键名" style="width:100px;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px" />
+            <input data-cph-key="${idx}" value="${escapeHtml(ph.key)}" placeholder="键名" style="width:100px;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px" />
             <div data-cph-picker="${idx}" style="flex:1"></div>
             <input type="hidden" data-cph-picked="${idx}" />
             <button type="button" class="fp-btn icon-only" data-cph-edit-default="${idx}" title="编辑默认值">${iconSvg('pencil')}</button>
@@ -5239,7 +5832,8 @@ seed: -1`;
           renderCustomPhList();
         };
       }
-      (card.querySelector('[data-reset-ph-defaults]') as HTMLElement | null)!.onclick = () => {
+      const resetDefaultsBtn = card.querySelector('[data-reset-ph-defaults]') as HTMLElement | null;
+      if (resetDefaultsBtn) resetDefaultsBtn.onclick = () => {
         if (selectedRoleOption === ROLE_DEFAULT_OPTION) {
           toast('当前正在编辑默认值，无需重置');
           return;
@@ -5254,20 +5848,26 @@ seed: -1`;
         toast('已重置为全部默认值');
       };
 
-      const loadWorldbookOptions = async () => {
+      let worldbookLoadSeq = 0;
+      const loadWorldbookOptions = async (mode: 'init' | 'manual' | 'auto' | 'watch' = 'init') => {
+        const seq = ++worldbookLoadSeq;
         if (!worldbookStatusEl) return;
-        worldbookStatusEl.textContent = '正在读取世界书列表...';
+        worldbookStatusEl.textContent = mode === 'watch' ? '已检测到角色切换，正在读取世界书列表...' : '正在读取世界书列表...';
         allWorldbookNames = getAllWorldbookNamesSafe();
         autoSelectedWorldbookNames = getCurrentCharacterBoundWorldbookNames();
-        selectedWorldbookName = autoSelectedWorldbookNames[0] || '';
+        if (mode === 'init' || mode === 'watch' || mode === 'auto') {
+          selectedWorldbookName = autoSelectedWorldbookNames[0] || '';
+        }
         if (!selectedWorldbookName) {
           for (const k of Object.keys(localRoleValues)) delete localRoleValues[k];
         }
         renderWorldbookSourceSelector();
         worldbookStatusEl.textContent = '正在读取所选世界书条目...';
-        worldbookOptions = await getWorldbookEntryOptionsByNames(selectedWorldbookName ? [selectedWorldbookName] : []);
+        const nextOptions = await getWorldbookEntryOptionsByNames(selectedWorldbookName ? [selectedWorldbookName] : []);
+        if (seq !== worldbookLoadSeq) return;
+        worldbookOptions = nextOptions;
         if (!worldbookOptions.length) {
-          worldbookStatusEl.textContent = '未读取到可用世界书条目（可手动切换映射来源）';
+          worldbookStatusEl.textContent = mode === 'auto' ? '自动选择的世界书暂无可用条目' : '未读取到可用世界书条目（可手动切换映射来源）';
         } else {
           worldbookStatusEl.textContent = `已加载 ${worldbookOptions.length} 个条目`;
         }
@@ -5295,15 +5895,7 @@ seed: -1`;
           if (!selectedWorldbookName) {
             for (const k of Object.keys(localRoleValues)) delete localRoleValues[k];
           }
-          if (worldbookStatusEl) worldbookStatusEl.textContent = '正在读取所选世界书条目...';
-          worldbookOptions = await getWorldbookEntryOptionsByNames(selectedWorldbookName ? [selectedWorldbookName] : []);
-          if (worldbookStatusEl) {
-            worldbookStatusEl.textContent = worldbookOptions.length
-              ? `已加载 ${worldbookOptions.length} 个条目`
-              : '当前选择下没有可用条目';
-          }
-          renderFixedPhList();
-          renderCustomPhList();
+          await loadWorldbookOptions('manual');
         };
       }
       if (worldbookAutoBtn) {
@@ -5319,15 +5911,7 @@ seed: -1`;
           } else {
             toast('当前角色未绑定世界书，已回退到：无');
           }
-          if (worldbookStatusEl) worldbookStatusEl.textContent = '已按当前角色自动选择世界书，正在刷新条目...';
-          worldbookOptions = await getWorldbookEntryOptionsByNames(selectedWorldbookName ? [selectedWorldbookName] : []);
-          if (worldbookStatusEl) {
-            worldbookStatusEl.textContent = worldbookOptions.length
-              ? `已加载 ${worldbookOptions.length} 个条目`
-              : '自动选择的世界书暂无可用条目';
-          }
-          renderFixedPhList();
-          renderCustomPhList();
+          await loadWorldbookOptions('auto');
         };
       }
       let roleWatchBusy = false;
@@ -5352,15 +5936,7 @@ seed: -1`;
               for (const k of Object.keys(localRoleValues)) delete localRoleValues[k];
             }
             renderWorldbookSourceSelector();
-            if (worldbookStatusEl) worldbookStatusEl.textContent = '已检测到角色切换，正在刷新世界书条目...';
-            worldbookOptions = await getWorldbookEntryOptionsByNames(selectedWorldbookName ? [selectedWorldbookName] : []);
-            if (worldbookStatusEl) {
-              worldbookStatusEl.textContent = worldbookOptions.length
-                ? `已加载 ${worldbookOptions.length} 个条目`
-                : '未读取到可用世界书条目（可手动切换映射来源）';
-            }
-            renderFixedPhList();
-            renderCustomPhList();
+            await loadWorldbookOptions('watch');
             toast('已检测角色切换，世界书来源已刷新');
           }
         } finally {
@@ -5377,7 +5953,7 @@ seed: -1`;
           usedKeys.add(k);
         }
         localCustomPhs.forEach((ph, idx) => {
-          const key = (card.querySelector(`[data-cph-key="${idx}"]`) as HTMLInputElement | null)?.value.trim();
+          const key = getInputValueTrim(card, `[data-cph-key="${idx}"]`);
           const val = String(ph.defaultValue || '').trim();
           if (key && !rows.includes(key)) {
             if (usedKeys.has(key)) {
@@ -5404,7 +5980,7 @@ seed: -1`;
           if (pickedVal && pickedVal !== defaultVal) draft[k] = pickedVal;
         }
         localCustomPhs.forEach((ph, idx) => {
-          const key = (card.querySelector(`[data-cph-key="${idx}"]`) as HTMLInputElement | null)?.value.trim();
+          const key = getInputValueTrim(card, `[data-cph-key="${idx}"]`);
           const pickedVal = String((card.querySelector(`[data-cph-picked="${idx}"]`) as HTMLInputElement | null)?.value || '').trim();
           const defaultVal = String(ph.defaultValue || key || '').trim();
           if (key && !rows.includes(key) && pickedVal) {
@@ -5415,7 +5991,8 @@ seed: -1`;
         return draft;
       };
 
-      (card.querySelector('[data-refresh-input]') as HTMLElement | null)!.onclick = () => {
+      const refreshInputBtn = card.querySelector('[data-refresh-input]') as HTMLElement | null;
+      if (refreshInputBtn) refreshInputBtn.onclick = () => {
         const ta = getInputBox();
         if (!ta) {
           toast('未找到输入框');
@@ -5487,10 +6064,12 @@ seed: -1`;
               try {
                 const data = JSON.parse(reader.result as string);
                 if (data.theme) {
-                  (card.querySelector('[data-theme]') as HTMLSelectElement).value = data.theme;
+                  const themeEl = card.querySelector('[data-theme]') as HTMLSelectElement | null;
+                  if (themeEl) themeEl.value = String(data.theme);
                 }
                 if (data.customCSS !== undefined) {
-                  (card.querySelector('[data-custom-css]') as HTMLTextAreaElement).value = data.customCSS;
+                  const cssEl = card.querySelector('[data-custom-css]') as HTMLTextAreaElement | null;
+                  if (cssEl) cssEl.value = String(data.customCSS || '');
                 }
                 const panel = pD.querySelector('.fp-panel') as HTMLElement | null;
                 const overlay = pD.getElementById(OVERLAY_ID) as HTMLElement | null;
@@ -5507,15 +6086,15 @@ seed: -1`;
         };
       }
 
-      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = () => {
-        close();
-      };
-      (card.querySelector('[data-save]') as HTMLElement | null)!.onclick = () => {
+      const settingsCloseBtn = card.querySelector('[data-close]') as HTMLElement | null;
+      if (settingsCloseBtn) settingsCloseBtn.onclick = () => close();
+      const settingsSaveBtn = card.querySelector('[data-save]') as HTMLElement | null;
+      if (settingsSaveBtn) settingsSaveBtn.onclick = () => {
         // 收集连接符数据
         const updatedConnectors: ConnectorButton[] = [];
         localConnectors.forEach((conn, idx) => {
-          const label = (card.querySelector(`[data-conn-label="${idx}"]`) as HTMLInputElement)?.value.trim();
-          const token = (card.querySelector(`[data-conn-token="${idx}"]`) as HTMLInputElement)?.value.trim();
+          const label = getInputValueTrim(card, `[data-conn-label="${idx}"]`);
+          const token = getInputValueTrim(card, `[data-conn-token="${idx}"]`);
           const color = CONNECTOR_COLOR_HEX[conn.color] ? conn.color : 'orange';
           if (label && token) {
             updatedConnectors.push({ id: conn.id, label, token, color });
@@ -5542,14 +6121,14 @@ seed: -1`;
         state.pack!.settings.toast.timeout = Math.max(600, Math.min(8000, toastTimeout || 1800));
 
         localQrLlmSettings.enabledStream = !!(card.querySelector('[data-qr-stream]') as HTMLInputElement | null)?.checked;
-        localQrLlmSettings.generationParams.temperature = Number((card.querySelector('[data-qr-temperature]') as HTMLInputElement | null)?.value || 0.9);
+        localQrLlmSettings.generationParams.temperature = Number((card.querySelector('[data-qr-temperature]') as HTMLInputElement | null)?.value || 1);
         localQrLlmSettings.generationParams.top_p = Number((card.querySelector('[data-qr-top-p]') as HTMLInputElement | null)?.value || 1);
-        localQrLlmSettings.generationParams.max_tokens = Number((card.querySelector('[data-qr-max-tokens]') as HTMLInputElement | null)?.value || 1024);
+        localQrLlmSettings.generationParams.max_tokens = Number((card.querySelector('[data-qr-max-tokens]') as HTMLInputElement | null)?.value || 8192);
         localQrLlmSettings.generationParams.presence_penalty = Number((card.querySelector('[data-qr-presence]') as HTMLInputElement | null)?.value || 0);
         localQrLlmSettings.generationParams.frequency_penalty = Number((card.querySelector('[data-qr-frequency]') as HTMLInputElement | null)?.value || 0);
-        localQrLlmSettings.generationParams.temperature = Math.max(0, Math.min(2, Number.isFinite(localQrLlmSettings.generationParams.temperature) ? localQrLlmSettings.generationParams.temperature : 0.9));
+        localQrLlmSettings.generationParams.temperature = Math.max(0, Math.min(2, Number.isFinite(localQrLlmSettings.generationParams.temperature) ? localQrLlmSettings.generationParams.temperature : 1));
         localQrLlmSettings.generationParams.top_p = Math.max(0, Math.min(1, Number.isFinite(localQrLlmSettings.generationParams.top_p) ? localQrLlmSettings.generationParams.top_p : 1));
-        localQrLlmSettings.generationParams.max_tokens = Math.max(16, Math.min(8192, Number.isFinite(localQrLlmSettings.generationParams.max_tokens) ? Math.round(localQrLlmSettings.generationParams.max_tokens) : 1024));
+        localQrLlmSettings.generationParams.max_tokens = Math.max(16, Math.min(8192, Number.isFinite(localQrLlmSettings.generationParams.max_tokens) ? Math.round(localQrLlmSettings.generationParams.max_tokens) : 8192));
         localQrLlmSettings.generationParams.presence_penalty = Math.max(-2, Math.min(2, Number.isFinite(localQrLlmSettings.generationParams.presence_penalty) ? localQrLlmSettings.generationParams.presence_penalty : 0));
         localQrLlmSettings.generationParams.frequency_penalty = Math.max(-2, Math.min(2, Number.isFinite(localQrLlmSettings.generationParams.frequency_penalty) ? localQrLlmSettings.generationParams.frequency_penalty : 0));
         localQrLlmSettings.presetStore = normalizeQrLlmPresetStore(localQrLlmPresetStore);
@@ -5637,7 +6216,11 @@ seed: -1`;
         }
         state.pack!.settings.placeholderRoleMaps.byCharacterId = cleanedRoleMaps;
         state.pack!.settings.placeholderRoleMaps.characterMeta = cleanedMeta;
-        saveQrLlmSecretConfig(localQrLlmSecret);
+        const savedSecret = saveQrLlmSecretConfig(localQrLlmSecret);
+        if (!savedSecret) {
+          toast('设置保存失败：LLM私密配置写入失败');
+          return;
+        }
         if (localQrLlmSecret.model && !state.qrLlmModelList.includes(localQrLlmSecret.model)) {
           state.qrLlmModelList = [...state.qrLlmModelList, localQrLlmSecret.model];
         }
@@ -5652,10 +6235,7 @@ seed: -1`;
 
   function openEditItemModal(item: Item | null, presetCategoryId?: string | null): void {
     if (!state.pack) return;
-    state.editGenerateState.isGenerating = false;
-    state.editGenerateState.abortController = null;
-    state.editGenerateState.lastDraftBeforeGenerate = '';
-    state.editGenerateState.lastGeneratedText = '';
+    invalidateEditGeneration(true);
     showModal((close) => {
       const card = pD.createElement('div');
       card.className = 'fp-modal-card fp-edit-item-card';
@@ -5671,11 +6251,11 @@ seed: -1`;
       card.innerHTML = `
         <div class="fp-modal-title">✏️ 编辑条目</div>
         <div class="fp-edit-scroll">
-        <div class="fp-row"><label>名称</label><input data-name value="${item ? item.name : ''}" /></div>
+        <div class="fp-row"><label>名称</label><input data-name value="${escapeHtml(item ? item.name : '')}" /></div>
         <div class="fp-row fp-row-block">
           <label>执行内容</label>
           <div class="fp-content-editor">
-            <textarea data-content>${item ? item.content : ''}</textarea>
+            <textarea data-content>${escapeHtml(item ? item.content : '')}</textarea>
             <button type="button" class="fp-qr-undo-btn" data-qr-undo style="display:none" title="撤回生成">${iconSvg('undo')}</button>
             <button type="button" class="fp-qr-gen-btn" data-qr-generate title="AI扩写">${iconSvg('sparkles')}</button>
           </div>
@@ -5756,7 +6336,9 @@ seed: -1`;
           }
           if (state.editGenerateState.isGenerating) return;
 
+          const reqId = ++state.editGenerateState.requestSeq;
           const ac = new AbortController();
+          state.editGenerateState.activeRequestId = reqId;
           state.editGenerateState.abortController = ac;
           state.editGenerateState.isGenerating = true;
           state.editGenerateState.lastDraftBeforeGenerate = contentEl.value;
@@ -5774,10 +6356,12 @@ seed: -1`;
               onDelta: streamEnabled
                 ? (text) => {
                     if (!contentEl) return;
+                    if (state.editGenerateState.activeRequestId !== reqId) return;
                     contentEl.value = text;
                   }
                 : undefined,
             });
+            if (state.editGenerateState.activeRequestId !== reqId) return;
             const finalText = String(result || '').trim();
             if (!finalText) throw new Error('生成结果为空');
             contentEl.value = finalText;
@@ -5786,6 +6370,7 @@ seed: -1`;
             setGenerateStatus('扩写完成，可继续编辑或点击撤回恢复草稿', 'ok');
             toast('执行内容已扩写完成');
           } catch (err) {
+            if (state.editGenerateState.activeRequestId !== reqId) return;
             const msg = err instanceof Error ? err.message : String(err);
             if (String(msg).toLowerCase().includes('aborted')) {
               setGenerateStatus('已取消生成', 'warn');
@@ -5798,6 +6383,7 @@ seed: -1`;
               toast(`生成失败: ${msg}`);
             }
           } finally {
+            if (state.editGenerateState.activeRequestId !== reqId) return;
             state.editGenerateState.isGenerating = false;
             state.editGenerateState.abortController = null;
             setGeneratingUi(false);
@@ -5806,7 +6392,8 @@ seed: -1`;
       }
 
       if (item) {
-        (card.querySelector('[data-del]') as HTMLElement | null)!.onclick = () => {
+        const delBtn = card.querySelector('[data-del]') as HTMLElement | null;
+        if (delBtn) delBtn.onclick = () => {
           if (!confirm('确认删除该条目？')) return;
           state.pack!.items = state.pack!.items.filter((i) => i.id !== item.id);
           persistPack();
@@ -5816,13 +6403,15 @@ seed: -1`;
         };
       }
 
-      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = () => {
-        try { state.editGenerateState.abortController?.abort(); } catch (e) {}
+      const closeBtn = card.querySelector('[data-close]') as HTMLElement | null;
+      if (closeBtn) closeBtn.onclick = () => {
+        invalidateEditGeneration(true);
         close();
       };
-      (card.querySelector('[data-save]') as HTMLElement | null)!.onclick = () => {
-        const name = (card.querySelector('[data-name]') as HTMLInputElement | null)?.value.trim();
-        const content = (card.querySelector('[data-content]') as HTMLTextAreaElement | null)?.value.trim();
+      const saveBtn = card.querySelector('[data-save]') as HTMLElement | null;
+      if (saveBtn) saveBtn.onclick = () => {
+        const name = getInputValueTrim(card, '[data-name]');
+        const content = getInputValueTrim(card, '[data-content]');
         const mode = (card.querySelector('[data-mode]') as HTMLSelectElement | null)?.value === 'inject' ? 'inject' : 'append';
         const categoryId = (card.querySelector('[data-cat]') as HTMLInputElement | null)?.value;
         if (!name || !content) {
@@ -5871,7 +6460,7 @@ seed: -1`;
       card.innerHTML = `
         <div class="fp-modal-title">✨ 快速添加自定义</div>
         <div class="fp-edit-scroll">
-        <div class="fp-row"><label>名称</label><input data-name value="${defaultName}" placeholder="如：转场总结" /></div>
+        <div class="fp-row"><label>名称</label><input data-name value="${escapeHtml(defaultName)}" placeholder="如：转场总结" /></div>
         <div class="fp-row"><label>执行内容</label><textarea data-content placeholder="输入要发送的内容..."></textarea></div>
         <div class="fp-row"><label>执行方式</label>
           <select data-mode>
@@ -5919,11 +6508,13 @@ seed: -1`;
       syncSaveCategoryVisibility();
       if (saveLibEl) saveLibEl.onchange = syncSaveCategoryVisibility;
 
-      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = close;
-      (card.querySelector('[data-confirm]') as HTMLElement | null)!.onclick = async () => {
+      const customCloseBtn = card.querySelector('[data-close]') as HTMLElement | null;
+      if (customCloseBtn) customCloseBtn.onclick = close;
+      const customConfirmBtn = card.querySelector('[data-confirm]') as HTMLElement | null;
+      if (customConfirmBtn) customConfirmBtn.onclick = async () => {
         if (!state.pack) return;
-        const nameInput = (card.querySelector('[data-name]') as HTMLInputElement | null)?.value.trim();
-        const contentInput = (card.querySelector('[data-content]') as HTMLTextAreaElement | null)?.value.trim();
+        const nameInput = getInputValueTrim(card, '[data-name]');
+        const contentInput = getInputValueTrim(card, '[data-content]');
         const mode = (card.querySelector('[data-mode]') as HTMLSelectElement | null)?.value === 'inject' ? 'inject' : 'append';
         const shouldSave = !!(card.querySelector('[data-save-lib]') as HTMLInputElement | null)?.checked;
         const categoryId = (card.querySelector('[data-save-cat]') as HTMLInputElement | null)?.value || null;
@@ -6061,7 +6652,7 @@ seed: -1`;
           if (kw && !p.toLowerCase().includes(kw)) continue;
           const row = pD.createElement('label');
           row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:6px;border-radius:8px';
-          row.innerHTML = `<input type="checkbox" data-cat-id="${cat.id}" checked /><span style="font-size:12px;line-height:1.35">${p}</span>`;
+          row.innerHTML = `<input type="checkbox" data-cat-id="${escapeHtml(cat.id)}" checked /><span style="font-size:12px;line-height:1.35">${escapeHtml(p)}</span>`;
           catsWrap?.appendChild(row);
         }
 
@@ -6070,26 +6661,30 @@ seed: -1`;
           if (kw && !full.toLowerCase().includes(kw) && !(item.content || '').toLowerCase().includes(kw)) continue;
           const row = pD.createElement('label');
           row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:6px;border-radius:8px';
-          row.innerHTML = `<input type="checkbox" data-item-id="${item.id}" checked /><span style="font-size:12px;line-height:1.35"><b>${item.name}</b><br/><span style="opacity:.7">${pathMap.get(item.categoryId || '') || ''}</span></span>`;
+          row.innerHTML = `<input type="checkbox" data-item-id="${escapeHtml(item.id)}" checked /><span style="font-size:12px;line-height:1.35"><b>${escapeHtml(item.name)}</b><br/><span style="opacity:.7">${escapeHtml(pathMap.get(item.categoryId || '') || '')}</span></span>`;
           itemsWrap?.appendChild(row);
         }
       };
       renderLists();
 
-      filterInput!.oninput = renderLists;
-      (card.querySelector('[data-all]') as HTMLElement | null)!.onclick = () => {
+      if (filterInput) filterInput.oninput = renderLists;
+      const allBtn = card.querySelector('[data-all]') as HTMLElement | null;
+      if (allBtn) allBtn.onclick = () => {
         card.querySelectorAll('input[type="checkbox"]').forEach((el) => { (el as HTMLInputElement).checked = true; });
       };
-      (card.querySelector('[data-none]') as HTMLElement | null)!.onclick = () => {
+      const noneBtn = card.querySelector('[data-none]') as HTMLElement | null;
+      if (noneBtn) noneBtn.onclick = () => {
         card.querySelectorAll('input[type="checkbox"]').forEach((el) => { (el as HTMLInputElement).checked = false; });
       };
 
-      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = () => {
+      const closeBtn = card.querySelector('[data-close]') as HTMLElement | null;
+      if (closeBtn) closeBtn.onclick = () => {
         closeSelect();
         onDone(null, false);
       };
 
-      (card.querySelector('[data-next]') as HTMLElement | null)!.onclick = () => {
+      const nextBtn = card.querySelector('[data-next]') as HTMLElement | null;
+      if (nextBtn) nextBtn.onclick = () => {
         const selectedCategoryIds = [...card.querySelectorAll('input[data-cat-id]:checked')].map((el) => el.getAttribute('data-cat-id') || '');
         const selectedItemIds = [...card.querySelectorAll('input[data-item-id]:checked')].map((el) => el.getAttribute('data-item-id') || '');
         const includeSettings = !!(card.querySelector('[data-include-settings]') as HTMLInputElement | null)?.checked;
@@ -6265,22 +6860,26 @@ seed: -1`;
       let loadedFileText = '';
       let loadedFileName = '';
 
-      fileInput!.onchange = async () => {
-        const file = fileInput?.files && fileInput.files[0];
-        if (!file) return;
-        try {
-          loadedFileText = await file.text();
-          loadedFileName = file.name || '';
-          toast(`已加载文件: ${loadedFileName || 'JSON'}`);
-        } catch (e) {
-          loadedFileText = '';
-          loadedFileName = '';
-          toast('读取文件失败');
-        }
-      };
+      if (fileInput) {
+        fileInput.onchange = async () => {
+          const file = fileInput?.files && fileInput.files[0];
+          if (!file) return;
+          try {
+            loadedFileText = await file.text();
+            loadedFileName = file.name || '';
+            toast(`已加载文件: ${loadedFileName || 'JSON'}`);
+          } catch (e) {
+            loadedFileText = '';
+            loadedFileName = '';
+            toast('读取文件失败');
+          }
+        };
+      }
 
-      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = close;
-      (card.querySelector('[data-parse]') as HTMLElement | null)!.onclick = async () => {
+      const closeBtn = card.querySelector('[data-close]') as HTMLElement | null;
+      if (closeBtn) closeBtn.onclick = close;
+      const parseBtn = card.querySelector('[data-parse]') as HTMLElement | null;
+      if (parseBtn) parseBtn.onclick = async () => {
         let parsed: unknown;
         try {
           let raw = loadedFileText;
@@ -6344,8 +6943,10 @@ seed: -1`;
                   <button class="primary" data-apply>确认</button>
                 </div>
               `;
-              (policyCard.querySelector('[data-close]') as HTMLElement | null)!.onclick = closePolicy;
-              (policyCard.querySelector('[data-apply]') as HTMLElement | null)!.onclick = () => {
+              const policyCloseBtn = policyCard.querySelector('[data-close]') as HTMLElement | null;
+              if (policyCloseBtn) policyCloseBtn.onclick = closePolicy;
+              const policyApplyBtn = policyCard.querySelector('[data-apply]') as HTMLElement | null;
+              if (policyApplyBtn) policyApplyBtn.onclick = () => {
                 const policy = ((policyCard.querySelector('[data-map-policy]') as HTMLSelectElement | null)?.value || 'overwrite') as 'skip' | 'overwrite';
                 closePolicy();
                 doApply(policy);
@@ -6409,7 +7010,7 @@ seed: -1`;
               const row = pD.createElement('div');
               row.style.cssText = 'padding:8px;border:1px solid rgba(174,199,190,.2);border-radius:10px;margin-bottom:8px';
               row.innerHTML = `
-                <div style="font-size:12px;margin-bottom:6px">${c.type === 'category' ? '分类' : '条目'} 冲突：<b>${c.incoming.name}</b></div>
+                <div style="font-size:12px;margin-bottom:6px">${c.type === 'category' ? '分类' : '条目'} 冲突：<b>${escapeHtml(c.incoming.name)}</b></div>
                 <div class="fp-row"><label>策略</label>
                   <select data-action="${idx}">
                     <option value="skip" selected>跳过</option>
@@ -6422,11 +7023,13 @@ seed: -1`;
               list?.appendChild(row);
             });
 
-            (c2.querySelector('[data-close]') as HTMLElement | null)!.onclick = closeConflict;
-            (c2.querySelector('[data-apply]') as HTMLElement | null)!.onclick = () => {
+            const conflictCloseBtn = c2.querySelector('[data-close]') as HTMLElement | null;
+            if (conflictCloseBtn) conflictCloseBtn.onclick = closeConflict;
+            const conflictApplyBtn = c2.querySelector('[data-apply]') as HTMLElement | null;
+            if (conflictApplyBtn) conflictApplyBtn.onclick = () => {
               conflicts.forEach((c, idx) => {
                 c.action = (c2.querySelector(`[data-action="${idx}"]`) as HTMLSelectElement | null)?.value as ConflictItem['action'] || 'skip';
-                c.rename = (c2.querySelector(`[data-rename="${idx}"]`) as HTMLInputElement | null)?.value.trim() || '';
+                c.rename = getInputValueTrim(c2, `[data-rename="${idx}"]`) || '';
               });
               askRoleMapPolicyThenApply((policy) => {
                 applyImport(selectedIncoming, conflicts, includeSettings, policy);
@@ -6632,7 +7235,8 @@ seed: -1`;
       `;
       const ta = card.querySelector('[data-json]') as HTMLTextAreaElement | null;
       if (ta) ta.value = text;
-      (card.querySelector('[data-download]') as HTMLElement | null)!.onclick = () => {
+      const exportDownloadBtn = card.querySelector('[data-download]') as HTMLElement | null;
+      if (exportDownloadBtn) exportDownloadBtn.onclick = () => {
         const blob = new Blob([ta?.value || text], { type: 'application/json;charset=utf-8' });
         const a = pD.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -6640,7 +7244,8 @@ seed: -1`;
         a.click();
         URL.revokeObjectURL(a.href);
       };
-      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = close;
+      const exportCloseBtn = card.querySelector('[data-close]') as HTMLElement | null;
+      if (exportCloseBtn) exportCloseBtn.onclick = close;
       return card;
     });
   }
@@ -6805,7 +7410,9 @@ seed: -1`;
       <button class="fp-menu-btn" data-act="delete">删除</button>
     `;
     menu.onclick = async (e) => {
-      const btn = (e.target as HTMLElement).closest('[data-act]');
+      const target = asDomElement(e.target);
+      if (!target) return;
+      const btn = target.closest('[data-act]');
       if (!btn) return;
       const act = btn.getAttribute('data-act');
       if (act === 'edit') openEditItemModal(item);
@@ -6816,7 +7423,7 @@ seed: -1`;
       }
       if (act === 'copy') {
         try {
-          await navigator.clipboard.writeText(item.content || '');
+          await copyTextRobust(item.content || '');
           toast('已复制执行内容');
         } catch (err) {
           toast('复制失败');
@@ -6834,28 +7441,66 @@ seed: -1`;
       }
       if (act === 'move') {
         showModal((close) => {
+          const currentPath = getPath(item.categoryId || '').map((p) => p.name).join(' / ') || '未分类';
           const card = pD.createElement('div');
-          card.className = 'fp-modal-card';
+          card.className = 'fp-modal-card fp-move-item-card';
           card.innerHTML = `
-            <div class="fp-modal-title">移动条目：${item.name}</div>
-            <div class="fp-row fp-row-block"><label>目标分类</label>
-              <div class="fp-cat-field">
-                <div data-target-picker></div>
-                <input type="hidden" data-target />
+            <div class="fp-modal-title">移动条目：${escapeHtml(item.name)}</div>
+            <div class="fp-move-body">
+              <div class="fp-move-meta">
+                <div class="fp-move-meta-item">
+                  <div class="fp-move-meta-label">当前分类</div>
+                  <div class="fp-move-meta-value">${escapeHtml(currentPath)}</div>
+                </div>
+                <div class="fp-move-meta-item">
+                  <div class="fp-move-meta-label">目标分类</div>
+                  <div class="fp-move-meta-value is-placeholder" data-target-path>请选择目标分类</div>
+                </div>
               </div>
+              <div class="fp-row fp-row-block"><label>目标分类</label>
+                <div class="fp-cat-field">
+                  <div data-target-picker></div>
+                  <input type="hidden" data-target />
+                </div>
+              </div>
+              <div class="fp-move-note" data-move-note>选择一个新的分类后即可移动。</div>
             </div>
-            <div class="fp-actions"><button data-close>取消</button><button class="primary" data-ok>移动</button></div>
+            <div class="fp-actions">
+              <button data-close>取消</button>
+              <button class="primary" data-ok disabled>移动</button>
+            </div>
           `;
+          const targetPathEl = card.querySelector('[data-target-path]') as HTMLElement | null;
+          const noteEl = card.querySelector('[data-move-note]') as HTMLElement | null;
+          const okMoveBtn = card.querySelector('[data-ok]') as HTMLButtonElement | null;
+          const updateMoveState = (row: { id: string; fullPath: string; name: string } | null) => {
+            const nextPath = row?.fullPath || '请选择目标分类';
+            if (targetPathEl) {
+              targetPathEl.textContent = nextPath;
+              targetPathEl.classList.toggle('is-placeholder', !row);
+            }
+            const sameCat = !row || row.id === (item.categoryId || '');
+            if (okMoveBtn) okMoveBtn.disabled = sameCat;
+            if (noteEl) {
+              noteEl.textContent = sameCat
+                ? '目标与当前分类相同，无需移动。'
+                : '目标已就绪，点击“移动”将立即生效并保存。';
+            }
+          };
           mountCategorySearchableSelect(card, {
             pickerSelector: '[data-target-picker]',
             valueSelector: '[data-target]',
             selectedId: item.categoryId || null,
             placeholder: '选择目标分类',
             searchPlaceholder: '搜索分类（支持模糊匹配）...',
+            onChange: updateMoveState,
           });
-          (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = close;
-          (card.querySelector('[data-ok]') as HTMLElement | null)!.onclick = () => {
-            moveItemToCategory(item.id, (card.querySelector('[data-target]') as HTMLInputElement | null)?.value || '');
+          const closeMoveBtn = card.querySelector('[data-close]') as HTMLElement | null;
+          if (closeMoveBtn) closeMoveBtn.onclick = close;
+          if (okMoveBtn) okMoveBtn.onclick = () => {
+            const targetId = (card.querySelector('[data-target]') as HTMLInputElement | null)?.value || '';
+            if (!targetId || targetId === (item.categoryId || '')) return;
+            moveItemToCategory(item.id, targetId);
             renderWorkbench();
             toast('条目已移动');
             close();
@@ -6916,11 +7561,11 @@ seed: -1`;
         const modeLabel = item.mode === 'inject' ? '注入' : '追加';
         card.innerHTML = `
           <div class="fp-card-icons">
-            <span class="fp-mini${item.mode === 'inject' ? ' inject' : ''}">${modeLabel}</span>
+            <span class="fp-mini${item.mode === 'inject' ? ' inject' : ''}">${escapeHtml(modeLabel)}</span>
             ${item.favorite ? '<span class="fp-fav-badge" title="已收藏"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 13.6 3.3 9.1A2.9 2.9 0 0 1 7.4 5l.6.6.6-.6a2.9 2.9 0 1 1 4.1 4.1L8 13.6Z" fill="currentColor"/></svg></span>' : ''}
           </div>
-          <div class="fp-card-title">${item.name}</div>
-          ${excerpt ? `<div class="fp-card-excerpt">${excerpt}</div>` : ''}
+          <div class="fp-card-title">${escapeHtml(item.name)}</div>
+          ${excerpt ? `<div class="fp-card-excerpt">${escapeHtml(excerpt)}</div>` : ''}
         `;
 
         card.onclick = (e) => {
@@ -6931,7 +7576,11 @@ seed: -1`;
           }
           e.preventDefault();
           e.stopPropagation();
-          runItemDirect(item);
+          void runItemDirect(item).catch((err) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            toast(`执行失败: ${msg}`);
+            logError('执行条目失败', msg);
+          });
         };
 
         card.oncontextmenu = (e) => {
@@ -6946,6 +7595,10 @@ seed: -1`;
           }, 520);
         }, { passive: true });
         card.addEventListener('touchend', () => {
+          if (state.longPressTimer) clearTimeout(state.longPressTimer);
+          state.longPressTimer = null;
+        });
+        card.addEventListener('touchcancel', () => {
           if (state.longPressTimer) clearTimeout(state.longPressTimer);
           state.longPressTimer = null;
         });
@@ -7156,13 +7809,17 @@ seed: -1`;
     
     // 结构化内容：名称 + 截断摘要
     const excerpt = truncateContent(item.content, 40);
-    btn.innerHTML = `<span>${item.name}</span>${excerpt ? `<span class="fp-cbtn-excerpt">${excerpt}</span>` : ''}`;
+    btn.innerHTML = `<span>${escapeHtml(item.name)}</span>${excerpt ? `<span class="fp-cbtn-excerpt">${escapeHtml(excerpt)}</span>` : ''}`;
     btn.style.cssText = 'display:inline-flex;flex-direction:column;align-items:flex-start;gap:1px';
     
     btn.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      runItemDirect(item);
+      void runItemDirect(item).catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        toast(`执行失败: ${msg}`);
+        logError('执行条目失败', msg);
+      });
     };
     btn.oncontextmenu = (e) => {
       e.preventDefault();
@@ -7175,6 +7832,10 @@ seed: -1`;
       }, 520);
     }, { passive: true });
     btn.addEventListener('touchend', () => {
+      if (state.longPressTimer) clearTimeout(state.longPressTimer);
+      state.longPressTimer = null;
+    });
+    btn.addEventListener('touchcancel', () => {
       if (state.longPressTimer) clearTimeout(state.longPressTimer);
       state.longPressTimer = null;
     });
@@ -7301,7 +7962,9 @@ seed: -1`;
       const baseIconName = i === 0 ? 'then' : (i === 1 ? 'simul' : 'add');
       const checked = prefixModeEnabled && c.id === selectedPrefixId;
       const iconName = checked ? 'check' : baseIconName;
-      return `<button class="fp-btn fp-conn-${c.color} fp-conn-btn ${checked ? 'is-selected' : ''}" data-conn-${i} title="${c.label}">${iconSvg(iconName)}${c.label}</button>`;
+      const safeColor = Object.prototype.hasOwnProperty.call(CONNECTOR_COLOR_HEX, c.color) ? c.color : 'orange';
+      const safeLabel = escapeHtml(c.label);
+      return `<button class="fp-btn fp-conn-${safeColor} fp-conn-btn ${checked ? 'is-selected' : ''}" data-conn-${i} title="${safeLabel}">${iconSvg(iconName)}${safeLabel}</button>`;
     }).join('');
     const connectorModeSwitchHtml = `
       <button type="button" class="fp-connector-switch ${prefixModeEnabled ? 'is-on' : ''}" data-conn-mode-toggle title="连接模式" aria-pressed="${prefixModeEnabled ? 'true' : 'false'}">
@@ -7583,13 +8246,23 @@ seed: -1`;
       newCatBtn.onclick = () => {
         const name = prompt('新分类名称');
         if (!name) return;
+        const finalName = String(name || '').trim();
+        if (!finalName) {
+          toast('分类名称不能为空');
+          return;
+        }
         const parent = state.currentCategoryId === '__favorites__'
           ? state.pack?.categories.find((c) => c.parentId === null)?.id || null
           : state.currentCategoryId;
         if (!state.pack) return;
+        const dup = state.pack.categories.find((c) => c.parentId === parent && c.name === finalName);
+        if (dup) {
+          toast('同级已存在同名分类');
+          return;
+        }
         state.pack.categories.push({
           id: uid('cat'),
-          name: name.trim(),
+          name: finalName,
           parentId: parent,
           order: treeChildren(parent).length,
           collapsed: false,
@@ -7619,13 +8292,23 @@ seed: -1`;
           closeContextMenu();
           const name = prompt('新分类名称');
           if (!name) return;
+          const finalName = String(name || '').trim();
+          if (!finalName) {
+            toast('分类名称不能为空');
+            return;
+          }
           const parent = state.currentCategoryId === '__favorites__'
             ? state.pack?.categories.find((c) => c.parentId === null)?.id || null
             : state.currentCategoryId;
           if (!state.pack) return;
+          const dup = state.pack.categories.find((c) => c.parentId === parent && c.name === finalName);
+          if (dup) {
+            toast('同级已存在同名分类');
+            return;
+          }
           state.pack.categories.push({
             id: uid('cat'),
-            name: name.trim(),
+            name: finalName,
             parentId: parent,
             order: treeChildren(parent).length,
             collapsed: false,
@@ -7678,8 +8361,14 @@ seed: -1`;
 
   function closeWorkbench() {
     closeContextMenu();
+    invalidateEditGeneration(true);
+    if (state.longPressTimer) {
+      clearTimeout(state.longPressTimer);
+      state.longPressTimer = null;
+    }
     detachHostResize();
     detachInputSyncListener();
+    flushPersistPack();
     const overlay = pD.getElementById(OVERLAY_ID);
     if (overlay) overlay.remove();
   }
@@ -7746,7 +8435,7 @@ seed: -1`;
     });
 
     applyFitPanelSize();
-    persistPack();
+    persistPack({ immediate: true });
     attachHostResize();
     attachInputSyncListener();
     renderWorkbench();
@@ -7756,7 +8445,7 @@ seed: -1`;
     if (state.debugHooksBound) return;
     state.debugHooksBound = true;
     try {
-      pW.addEventListener('error', (ev) => {
+      state.debugErrorHandler = (ev: Event) => {
         const e = ev as ErrorEvent;
         logError('全局异常', {
           message: String(e.message || ''),
@@ -7764,17 +8453,51 @@ seed: -1`;
           line: Number(e.lineno || 0),
           column: Number(e.colno || 0),
         });
-      });
-      pW.addEventListener('unhandledrejection', (ev) => {
+      };
+      state.debugRejectionHandler = (ev: Event) => {
         const e = ev as PromiseRejectionEvent;
         logError('未处理Promise拒绝', e.reason);
-      });
+      };
+      pW.addEventListener('error', state.debugErrorHandler);
+      pW.addEventListener('unhandledrejection', state.debugRejectionHandler);
     } catch (e) {}
   }
 
+  function detachGlobalDebugHooks(): void {
+    if (!state.debugHooksBound) return;
+    try {
+      if (state.debugErrorHandler) pW.removeEventListener('error', state.debugErrorHandler);
+      if (state.debugRejectionHandler) pW.removeEventListener('unhandledrejection', state.debugRejectionHandler);
+    } catch (e) {}
+    state.debugHooksBound = false;
+    state.debugErrorHandler = null;
+    state.debugRejectionHandler = null;
+  }
+
   function bootstrap() {
+    // 热重载/重复注入时先清理旧实例，避免事件重复绑定
+    try {
+      const oldRuntime = (pW as unknown as Record<string, unknown>)[RUNTIME_KEY] as { teardown?: () => void } | undefined;
+      if (oldRuntime?.teardown) oldRuntime.teardown();
+    } catch (e) {}
+    const cleanups: Array<() => void> = [];
+    (pW as unknown as Record<string, unknown>)[RUNTIME_KEY] = {
+      teardown: () => {
+        for (const fn of cleanups.splice(0)) {
+          try { fn(); } catch (e) {}
+        }
+        detachGlobalDebugHooks();
+        closeWorkbench();
+      },
+    };
+
     attachGlobalDebugHooks();
     state.pack = loadPack();
+    if (state.storageLoadHadCorruption) {
+      pW.setTimeout(() => {
+        toast('检测到历史存储数据异常，已使用默认数据启动（未自动覆盖原存储）。建议立即导入备份。');
+      }, 0);
+    }
     loadQrLlmSecretConfig();
     syncActiveCharacterMapping({ silent: true, force: true });
 
@@ -7809,26 +8532,49 @@ seed: -1`;
     try {
       const ev = getButtonEvent(BUTTON_LABEL);
       eventOn(ev, openWorkbench);
+      cleanups.push(() => {
+        try {
+          const offFn = (globalThis as unknown as { eventOff?: (name: unknown, handler: unknown) => void }).eventOff;
+          if (typeof offFn === 'function') offFn(ev, openWorkbench);
+        } catch (e) {}
+      });
     } catch (e) {
       console.error('[快速回复管理器] 事件监听失败', e);
       logError('事件监听失败', String(e));
     }
     try {
-      eventOn(tavern_events.CHAT_CHANGED, () => {
+      const onChatChanged = () => {
         const prevKey = state.activeCharacterSwitchKey;
         syncActiveCharacterMapping();
         if (prevKey !== state.activeCharacterSwitchKey) persistPack();
-      });
-      eventOn(tavern_events.CHARACTER_PAGE_LOADED, () => {
+      };
+      const onCharacterLoaded = () => {
         const prevKey = state.activeCharacterSwitchKey;
         syncActiveCharacterMapping();
         if (prevKey !== state.activeCharacterSwitchKey) persistPack();
+      };
+      eventOn(tavern_events.CHAT_CHANGED, onChatChanged);
+      eventOn(tavern_events.CHARACTER_PAGE_LOADED, onCharacterLoaded);
+      cleanups.push(() => {
+        try {
+          const offFn = (globalThis as unknown as { eventOff?: (name: unknown, handler: unknown) => void }).eventOff;
+          if (typeof offFn === 'function') {
+            offFn(tavern_events.CHAT_CHANGED, onChatChanged);
+            offFn(tavern_events.CHARACTER_PAGE_LOADED, onCharacterLoaded);
+          }
+        } catch (e) {}
       });
-    } catch (e) {}
+    } catch (e) {
+      logError('角色切换监听注册失败', String(e));
+    }
 
-    pD.addEventListener('click', (e) => {
-      if (state.contextMenu && !(e.target as HTMLElement).closest('.fp-menu')) closeContextMenu();
-    });
+    const onDocClick = (e: MouseEvent) => {
+      const target = asDomElement(e.target);
+      if (!target) return;
+      if (state.contextMenu && !target.closest('.fp-menu')) closeContextMenu();
+    };
+    pD.addEventListener('click', onDocClick);
+    cleanups.push(() => pD.removeEventListener('click', onDocClick));
 
     console.log('[快速回复管理器] 已加载');
     logInfo('脚本已加载');
