@@ -7,6 +7,8 @@
   const STYLE_ID = 'fast-plot-workbench-style-v1';
   const OVERLAY_ID = 'fast-plot-workbench-overlay';
   const TOAST_CONTAINER_ID = 'fast-plot-toast-container';
+  const QR_LLM_SECRET_KEY = 'fastPlotQRLlmSecret';
+  const DEFAULT_QR_LLM_PRESET_NAME = '默认预设';
   const DATA_VERSION = 1;
 
   const THEME_NAMES: Record<string, string> = {
@@ -69,8 +71,58 @@
     color: string; // 'orange'|'purple'|'green'|'blue'|'red'|'cyan' 或自定义hex
   }
 
+  interface QrLlmPreset {
+    systemPrompt: string;
+    userPromptTemplate: string;
+    updatedAt: string;
+    promptGroup?: Array<{
+      id?: string;
+      role: 'SYSTEM' | 'USER' | 'ASSISTANT';
+      position?: 'RELATIVE' | 'CHAT';
+      enabled?: boolean;
+      content: string;
+      note?: string;
+      name?: string;
+      injectionDepth?: number;
+      injectionOrder?: number;
+      marker?: boolean;
+      forbidOverrides?: boolean;
+    }>;
+    finalSystemDirective?: string;
+  }
+
+  interface QrLlmPresetStore {
+    version: 1;
+    presets: Record<string, QrLlmPreset>;
+  }
+
+  interface QrLlmSettings {
+    enabledStream: boolean;
+    generationParams: {
+      temperature: number;
+      top_p: number;
+      max_tokens: number;
+      presence_penalty: number;
+      frequency_penalty: number;
+    };
+    activePresetName: string;
+    presetStore: QrLlmPresetStore;
+  }
+
+  interface QrLlmSecretConfig {
+    url: string;
+    apiKey: string;
+    model: string;
+    manualModelId: string;
+    extraBodyParamsText: string;
+  }
+
   interface Settings {
     placeholders: Record<string, string>;
+    placeholderRoleMaps: {
+      byCharacterId: Record<string, Record<string, string>>;
+      characterMeta: Record<string, { name: string; lastSeenAt: string }>;
+    };
     tokens: { simultaneous: string; then: string };
     connectors: ConnectorButton[];
     toast: { maxStack: number; timeout: number };
@@ -81,6 +133,7 @@
       connectorPrefixId: string | null;
     };
     ui: { theme: string; customCSS: string };
+    qrLlm: QrLlmSettings;
   }
 
   interface UiState {
@@ -116,6 +169,21 @@
     inputSyncTarget: HTMLTextAreaElement | null;
     inputSyncHandler: ((e: Event) => void) | null;
     suspendInputSync: boolean;
+    activeCharacterId: string | null;
+    activeCharacterName: string;
+    activeCharacterSwitchKey: string;
+    activeIsGroupChat: boolean;
+    qrLlmSecretCache: QrLlmSecretConfig | null;
+    qrLlmModelList: string[];
+    editGenerateState: {
+      isGenerating: boolean;
+      abortController: AbortController | null;
+      lastDraftBeforeGenerate: string;
+      lastGeneratedText: string;
+      status: string;
+    };
+    debugLogs: string[];
+    debugHooksBound: boolean;
   }
 
   function resolveHostWindow(): Window {
@@ -152,6 +220,21 @@
     inputSyncTarget: null,
     inputSyncHandler: null,
     suspendInputSync: false,
+    activeCharacterId: null,
+    activeCharacterName: '',
+    activeCharacterSwitchKey: '__boot__',
+    activeIsGroupChat: false,
+    qrLlmSecretCache: null,
+    qrLlmModelList: [],
+    editGenerateState: {
+      isGenerating: false,
+      abortController: null,
+      lastDraftBeforeGenerate: '',
+      lastGeneratedText: '',
+      status: '',
+    },
+    debugLogs: [],
+    debugHooksBound: false,
   };
 
   function uid(prefix: string): string {
@@ -164,6 +247,34 @@
 
   function nowIso() {
     return new Date().toISOString();
+  }
+
+  function pushDebugLog(message: string, payload?: unknown): void {
+    const ts = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    const lines: string[] = [`[${ts}] ${String(message || '')}`];
+    if (payload !== undefined) {
+      try {
+        lines.push(typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2));
+      } catch (e) {
+        lines.push(String(payload));
+      }
+    }
+    state.debugLogs.push(lines.join('\n'));
+    if (state.debugLogs.length > 500) {
+      state.debugLogs = state.debugLogs.slice(-500);
+    }
+  }
+
+  function logInfo(message: string, payload?: unknown): void {
+    pushDebugLog(`INFO ${message}`, payload);
+  }
+
+  function logError(message: string, payload?: unknown): void {
+    pushDebugLog(`ERROR ${message}`, payload);
+  }
+
+  function getDebugLogText(): string {
+    return state.debugLogs.join('\n\n');
   }
 
   function getViewportSize() {
@@ -258,6 +369,327 @@
       pW.localStorage.setItem(`__${STORE_KEY}__`, JSON.stringify(data));
     } catch (e) {
       console.error('[快速回复管理器] 保存失败', e);
+      logError('保存脚本存储失败', String(e));
+    }
+  }
+
+  function buildDefaultQrLlmPresetStore(): QrLlmPresetStore {
+    const now = nowIso();
+    return {
+      version: 1,
+      presets: {
+        [DEFAULT_QR_LLM_PRESET_NAME]: {
+          systemPrompt: '',
+          userPromptTemplate: '',
+          promptGroup: [
+            {
+              id: uid('qrp'),
+              role: 'ASSISTANT',
+              name: '执行角色',
+              position: 'RELATIVE',
+              enabled: true,
+              injectionDepth: 4,
+              injectionOrder: 100,
+              content: [
+                '你是“快速回复执行内容扩写助手”。',
+                '任务：将用户给出的简要草稿扩写为可直接执行的完整执行内容。',
+                '必须保持草稿原意，不擅自改写目标。',
+              ].join('\n'),
+            },
+            {
+              id: uid('qrp'),
+              role: 'SYSTEM',
+              name: '回复格式规范',
+              position: 'RELATIVE',
+              enabled: true,
+              injectionDepth: 4,
+              injectionOrder: 100,
+              content: [
+                '只输出最终可执行正文。',
+                '不要输出解释、注释、前言、后记、分析过程。',
+                '不要输出 Markdown 代码块围栏。',
+              ].join('\n'),
+            },
+            {
+              id: uid('qrp'),
+              role: 'USER',
+              name: 'QR草稿输入',
+              position: 'RELATIVE',
+              enabled: true,
+              injectionDepth: 4,
+              injectionOrder: 100,
+              content: [
+                '【草稿】',
+                '{{draft}}',
+                '',
+                '【可用占位符】',
+                '{{placeholder_list}}',
+                '',
+                '【占位符映射(JSON)】',
+                '{{placeholder_map_json}}',
+              ].join('\n'),
+            },
+            {
+              id: uid('qrp'),
+              role: 'SYSTEM',
+              name: '变量MAP使用规范',
+              position: 'RELATIVE',
+              enabled: true,
+              injectionDepth: 4,
+              injectionOrder: 100,
+              content: [
+                '如果占位符在映射中有值，优先使用映射值理解语义。',
+                '未映射的占位符保持原样，不要删除、不硬编码。',
+                '不要新增未提供的新占位符键名。',
+                '保持占位符结构可替换性，不破坏现有占位符语法。',
+              ].join('\n'),
+            },
+            {
+              id: uid('qrp'),
+              role: 'SYSTEM',
+              name: '扩写策略',
+              position: 'RELATIVE',
+              enabled: true,
+              injectionDepth: 4,
+              injectionOrder: 100,
+              content: [
+                '补充必要的动作、场景、对象、约束和结果，使文本可以直接执行。',
+                '在不改变目标的前提下提升清晰度与可执行性。',
+                '避免空泛套话，避免与草稿无关的新增设定。',
+              ].join('\n'),
+            },
+          ],
+          updatedAt: now,
+        },
+      },
+    };
+  }
+
+  function normalizePromptGroup(
+    raw: unknown,
+  ): Array<{
+    id?: string;
+    role: 'SYSTEM' | 'USER' | 'ASSISTANT';
+    position?: 'RELATIVE' | 'CHAT';
+    enabled?: boolean;
+    content: string;
+    note?: string;
+    name?: string;
+    injectionDepth?: number;
+    injectionOrder?: number;
+    marker?: boolean;
+    forbidOverrides?: boolean;
+  }> {
+    if (!Array.isArray(raw)) return [];
+    const out: Array<{
+      id?: string;
+      role: 'SYSTEM' | 'USER' | 'ASSISTANT';
+      position?: 'RELATIVE' | 'CHAT';
+      enabled?: boolean;
+      content: string;
+      note?: string;
+      name?: string;
+      injectionDepth?: number;
+      injectionOrder?: number;
+      marker?: boolean;
+      forbidOverrides?: boolean;
+    }> = [];
+    raw.forEach((seg) => {
+      if (!seg || typeof seg !== 'object') return;
+      const roleRaw = String((seg as { role?: string }).role || '').toUpperCase();
+      const role = roleRaw === 'USER' || roleRaw === 'ASSISTANT' ? roleRaw : 'SYSTEM';
+      const content = String((seg as { content?: string }).content || '');
+      const note = String(
+        (seg as { note?: string; remark?: string; name?: string; title?: string }).note
+        || (seg as { remark?: string }).remark
+        || (seg as { name?: string }).name
+        || (seg as { title?: string }).title
+        || '',
+      ).trim();
+      const rawPos = String((seg as { position?: string }).position || '').toUpperCase();
+      const rawInjectionPos = Number((seg as { injection_position?: number }).injection_position);
+      const position: 'RELATIVE' | 'CHAT' =
+        rawPos === 'CHAT' || rawPos === 'IN_CHAT' || rawPos === 'CHAT_INJECTION' || rawInjectionPos === 1
+          ? 'CHAT'
+          : 'RELATIVE';
+      const enabled = typeof (seg as { enabled?: boolean }).enabled === 'boolean'
+        ? Boolean((seg as { enabled?: boolean }).enabled)
+        : true;
+      const identifier = String((seg as { id?: string; identifier?: string }).id || (seg as { identifier?: string }).identifier || '').trim();
+      const injectionDepth = Number((seg as { injectionDepth?: number; injection_depth?: number }).injectionDepth ?? (seg as { injection_depth?: number }).injection_depth ?? 4);
+      const injectionOrder = Number((seg as { injectionOrder?: number; injection_order?: number }).injectionOrder ?? (seg as { injection_order?: number }).injection_order ?? 100);
+      const marker = Boolean((seg as { marker?: boolean }).marker);
+      const forbidOverrides = Boolean((seg as { forbidOverrides?: boolean; forbid_overrides?: boolean }).forbidOverrides ?? (seg as { forbid_overrides?: boolean }).forbid_overrides);
+      if (!content.trim()) return;
+      out.push({
+        id: identifier || uid('qrp'),
+        role,
+        position,
+        enabled,
+        content,
+        note: note || undefined,
+        name: note || undefined,
+        injectionDepth: Number.isFinite(injectionDepth) ? injectionDepth : 4,
+        injectionOrder: Number.isFinite(injectionOrder) ? injectionOrder : 100,
+        marker: marker || undefined,
+        forbidOverrides: forbidOverrides || undefined,
+      });
+    });
+    return out;
+  }
+
+  function compileQrLlmPreset(preset: QrLlmPreset): QrLlmPreset {
+    const promptGroup = normalizePromptGroup(preset.promptGroup);
+    const finalSystemDirective = String(preset.finalSystemDirective || '').trim();
+    const activePromptGroup = promptGroup.filter((x) => x.enabled !== false);
+    const relativePromptGroup = activePromptGroup.filter((x) => String(x.position || 'RELATIVE') === 'RELATIVE');
+    const chatPromptGroup = activePromptGroup.filter((x) => String(x.position || 'RELATIVE') === 'CHAT');
+
+    let systemPrompt = String(preset.systemPrompt || '').trim();
+    let userPromptTemplate = String(preset.userPromptTemplate || '').trim();
+
+    if (activePromptGroup.length) {
+      const systemSegs = relativePromptGroup.filter((x) => x.role === 'SYSTEM').map((x) => x.content.trim()).filter(Boolean);
+      const userSegs = relativePromptGroup.filter((x) => x.role === 'USER').map((x) => x.content.trim()).filter(Boolean);
+      const assistantSegs = relativePromptGroup.filter((x) => x.role === 'ASSISTANT').map((x) => x.content.trim()).filter(Boolean);
+      const chatSegs = chatPromptGroup
+        .map((x) => `[${x.role}] ${String(x.content || '').trim()}`)
+        .filter((x) => String(x || '').trim());
+      if (systemSegs.length) {
+        const systemParts = [...systemSegs];
+        if (finalSystemDirective) systemParts.push(finalSystemDirective);
+        systemPrompt = systemParts.join('\n\n');
+      }
+      const userParts: string[] = [];
+      if (userSegs.length) userParts.push(userSegs.join('\n\n'));
+      if (assistantSegs.length) userParts.push(assistantSegs.join('\n\n'));
+      if (chatSegs.length) userParts.push(chatSegs.join('\n\n'));
+      if (userParts.length) userPromptTemplate = userParts.join('\n\n');
+    } else if (finalSystemDirective) {
+      systemPrompt = [systemPrompt, finalSystemDirective].filter(Boolean).join('\n\n');
+    }
+
+    if (!systemPrompt) systemPrompt = '你是执行内容扩写助手。';
+    if (!userPromptTemplate) userPromptTemplate = '{{draft}}';
+
+    return {
+      systemPrompt,
+      userPromptTemplate,
+      promptGroup: promptGroup.length ? promptGroup : undefined,
+      finalSystemDirective: finalSystemDirective || undefined,
+      updatedAt: String(preset.updatedAt || nowIso()),
+    };
+  }
+
+  function normalizeQrLlmPresetStore(store: QrLlmPresetStore | null | undefined): QrLlmPresetStore {
+    const safe = (store && typeof store === 'object' ? deepClone(store) : { version: 1, presets: {} }) as QrLlmPresetStore;
+    safe.version = 1;
+    safe.presets = (safe.presets && typeof safe.presets === 'object') ? safe.presets : {};
+    const legacyDefaultNames = ['默认扩写预设', '默认预设(旧)', 'default'];
+    legacyDefaultNames.forEach((legacy) => {
+      if (!safe.presets[legacy]) return;
+      if (!safe.presets[DEFAULT_QR_LLM_PRESET_NAME]) {
+        safe.presets[DEFAULT_QR_LLM_PRESET_NAME] = deepClone(safe.presets[legacy]);
+      }
+      delete safe.presets[legacy];
+    });
+    for (const [name, preset] of Object.entries(safe.presets)) {
+      if (!name || !preset || typeof preset !== 'object') {
+        delete safe.presets[name];
+        continue;
+      }
+      safe.presets[name] = compileQrLlmPreset({
+        systemPrompt: String(preset.systemPrompt || ''),
+        userPromptTemplate: String(preset.userPromptTemplate || ''),
+        promptGroup: normalizePromptGroup((preset as QrLlmPreset).promptGroup),
+        finalSystemDirective: String((preset as QrLlmPreset).finalSystemDirective || ''),
+        updatedAt: String(preset.updatedAt || nowIso()),
+      });
+    }
+    if (!safe.presets[DEFAULT_QR_LLM_PRESET_NAME]) {
+      const def = buildDefaultQrLlmPresetStore().presets[DEFAULT_QR_LLM_PRESET_NAME];
+      safe.presets[DEFAULT_QR_LLM_PRESET_NAME] = deepClone(def);
+    } else {
+      const def = buildDefaultQrLlmPresetStore().presets[DEFAULT_QR_LLM_PRESET_NAME];
+      const current = safe.presets[DEFAULT_QR_LLM_PRESET_NAME];
+      const currentGroups = normalizePromptGroup(current.promptGroup);
+      const looksLegacyDefault = currentGroups.some((x) => String(x.name || x.note || '').trim() === '系统规则');
+      if (looksLegacyDefault) {
+        safe.presets[DEFAULT_QR_LLM_PRESET_NAME] = deepClone(def);
+      }
+      const migrated = safe.presets[DEFAULT_QR_LLM_PRESET_NAME];
+      if (!normalizePromptGroup(migrated.promptGroup).length) {
+        safe.presets[DEFAULT_QR_LLM_PRESET_NAME].promptGroup = deepClone(def.promptGroup);
+      }
+      if (!String(migrated.finalSystemDirective || '').trim()) {
+        safe.presets[DEFAULT_QR_LLM_PRESET_NAME].finalSystemDirective = def.finalSystemDirective;
+      }
+      safe.presets[DEFAULT_QR_LLM_PRESET_NAME] = compileQrLlmPreset(safe.presets[DEFAULT_QR_LLM_PRESET_NAME]);
+    }
+    return safe;
+  }
+
+  function getDefaultQrLlmSettings(): QrLlmSettings {
+    const presetStore = buildDefaultQrLlmPresetStore();
+    return {
+      enabledStream: true,
+      generationParams: {
+        temperature: 0.9,
+        top_p: 1,
+        max_tokens: 1024,
+        presence_penalty: 0,
+        frequency_penalty: 0,
+      },
+      activePresetName: presetStore.presets[DEFAULT_QR_LLM_PRESET_NAME]
+        ? DEFAULT_QR_LLM_PRESET_NAME
+        : (Object.keys(presetStore.presets)[0] || ''),
+      presetStore,
+    };
+  }
+
+  function normalizeQrLlmSecret(raw: unknown): QrLlmSecretConfig {
+    const safe = (raw && typeof raw === 'object' ? raw : {}) as Partial<QrLlmSecretConfig>;
+    const manual = String(safe.manualModelId || '').trim();
+    const selected = String(safe.model || '').trim();
+    const extraBodyParamsText = String((safe as { extraBodyParamsText?: string; extraBodyParams?: string }).extraBodyParamsText
+      || (safe as { extraBodyParamsText?: string; extraBodyParams?: string }).extraBodyParams
+      || '');
+    return {
+      url: String(safe.url || '').trim(),
+      apiKey: String(safe.apiKey || ''),
+      model: selected || manual,
+      manualModelId: manual || selected,
+      extraBodyParamsText,
+    };
+  }
+
+  function loadQrLlmSecretConfig(): QrLlmSecretConfig {
+    try {
+      const raw = pW.localStorage.getItem(`__${QR_LLM_SECRET_KEY}__`);
+      const parsed = raw ? JSON.parse(raw) : null;
+      const normalized = normalizeQrLlmSecret(parsed);
+      state.qrLlmSecretCache = normalized;
+      return normalized;
+    } catch (e) {
+      const normalized = normalizeQrLlmSecret(null);
+      state.qrLlmSecretCache = normalized;
+      return normalized;
+    }
+  }
+
+  function getQrLlmSecretConfig(): QrLlmSecretConfig {
+    if (!state.qrLlmSecretCache) return loadQrLlmSecretConfig();
+    return normalizeQrLlmSecret(state.qrLlmSecretCache);
+  }
+
+  function saveQrLlmSecretConfig(secret: QrLlmSecretConfig): void {
+    const normalized = normalizeQrLlmSecret(secret);
+    state.qrLlmSecretCache = normalized;
+    try {
+      pW.localStorage.setItem(`__${QR_LLM_SECRET_KEY}__`, JSON.stringify(normalized));
+    } catch (e) {
+      console.error('[快速回复管理器] 保存LLM私密配置失败', e);
+      logError('保存LLM私密配置失败', String(e));
     }
   }
 
@@ -282,6 +714,38 @@
       黄毛: '黄毛',
     };
     for (const key of CONNECTOR_ONLY_KEYS) delete safe.settings!.placeholders[key];
+    safe.settings!.placeholderRoleMaps = safe.settings!.placeholderRoleMaps || {
+      byCharacterId: {},
+      characterMeta: {},
+    };
+    if (!safe.settings!.placeholderRoleMaps.byCharacterId || typeof safe.settings!.placeholderRoleMaps.byCharacterId !== 'object') {
+      safe.settings!.placeholderRoleMaps.byCharacterId = {};
+    }
+    if (!safe.settings!.placeholderRoleMaps.characterMeta || typeof safe.settings!.placeholderRoleMaps.characterMeta !== 'object') {
+      safe.settings!.placeholderRoleMaps.characterMeta = {};
+    }
+    for (const [characterId, values] of Object.entries(safe.settings!.placeholderRoleMaps.byCharacterId)) {
+      if (!values || typeof values !== 'object') {
+        delete safe.settings!.placeholderRoleMaps.byCharacterId[characterId];
+        continue;
+      }
+      const cleanMap: Record<string, string> = {};
+      for (const [k, v] of Object.entries(values)) {
+        if (!k || CONNECTOR_ONLY_KEYS.has(k)) continue;
+        cleanMap[String(k)] = String(v ?? '');
+      }
+      safe.settings!.placeholderRoleMaps.byCharacterId[characterId] = cleanMap;
+    }
+    for (const [characterId, meta] of Object.entries(safe.settings!.placeholderRoleMaps.characterMeta)) {
+      if (!meta || typeof meta !== 'object') {
+        delete safe.settings!.placeholderRoleMaps.characterMeta[characterId];
+        continue;
+      }
+      safe.settings!.placeholderRoleMaps.characterMeta[characterId] = {
+        name: String((meta as { name?: string }).name || ''),
+        lastSeenAt: String((meta as { lastSeenAt?: string }).lastSeenAt || nowIso()),
+      };
+    }
     safe.settings!.tokens = safe.settings!.tokens || {
       simultaneous: '<同时>',
       then: '<然后>',
@@ -308,6 +772,21 @@
     safe.settings!.defaults.connectorPrefixId = safe.settings!.defaults.connectorPrefixId ?? null;
     safe.settings!.ui = safe.settings!.ui || { theme: 'herdi-light', customCSS: '' };
     if (!('customCSS' in safe.settings!.ui)) (safe.settings!.ui as any).customCSS = '';
+    safe.settings!.qrLlm = safe.settings!.qrLlm || getDefaultQrLlmSettings();
+    if (typeof safe.settings!.qrLlm.enabledStream !== 'boolean') safe.settings!.qrLlm.enabledStream = true;
+    safe.settings!.qrLlm.generationParams = safe.settings!.qrLlm.generationParams || getDefaultQrLlmSettings().generationParams;
+    safe.settings!.qrLlm.generationParams.temperature = Number.isFinite(Number(safe.settings!.qrLlm.generationParams.temperature)) ? Number(safe.settings!.qrLlm.generationParams.temperature) : 0.9;
+    safe.settings!.qrLlm.generationParams.top_p = Number.isFinite(Number(safe.settings!.qrLlm.generationParams.top_p)) ? Number(safe.settings!.qrLlm.generationParams.top_p) : 1;
+    safe.settings!.qrLlm.generationParams.max_tokens = Number.isFinite(Number(safe.settings!.qrLlm.generationParams.max_tokens)) ? Number(safe.settings!.qrLlm.generationParams.max_tokens) : 1024;
+    safe.settings!.qrLlm.generationParams.presence_penalty = Number.isFinite(Number(safe.settings!.qrLlm.generationParams.presence_penalty)) ? Number(safe.settings!.qrLlm.generationParams.presence_penalty) : 0;
+    safe.settings!.qrLlm.generationParams.frequency_penalty = Number.isFinite(Number(safe.settings!.qrLlm.generationParams.frequency_penalty)) ? Number(safe.settings!.qrLlm.generationParams.frequency_penalty) : 0;
+    safe.settings!.qrLlm.presetStore = normalizeQrLlmPresetStore(
+      safe.settings!.qrLlm.presetStore || buildDefaultQrLlmPresetStore(),
+    );
+    safe.settings!.qrLlm.activePresetName = String(safe.settings!.qrLlm.activePresetName || '').trim();
+    if (!safe.settings!.qrLlm.activePresetName || !safe.settings!.qrLlm.presetStore.presets[safe.settings!.qrLlm.activePresetName]) {
+      safe.settings!.qrLlm.activePresetName = DEFAULT_QR_LLM_PRESET_NAME;
+    }
 
     safe.uiState = safe.uiState || {} as UiState;
     safe.uiState!.sidebar = safe.uiState!.sidebar || {
@@ -448,6 +927,10 @@
           苦主: '苦主',
           黄毛: '黄毛',
         },
+        placeholderRoleMaps: {
+          byCharacterId: {},
+          characterMeta: {},
+        },
         tokens: {
           simultaneous: '<同时>',
           then: '<然后>',
@@ -465,6 +948,7 @@
         ui: {
           theme: 'herdi-light',
         },
+        qrLlm: getDefaultQrLlmSettings(),
       },
       uiState: {
         sidebar: { expanded: {}, width: 280, collapsed: false },
@@ -578,6 +1062,9 @@ body {
   --qr-btn-border:rgba(23,24,28,.18);
   --qr-btn-hover-bg:#fff;
   --qr-btn-hover-border:rgba(23,24,28,.34);
+  --qr-btn-edge-hi:rgba(255,255,255,.16);
+  --qr-btn-edge-lo:rgba(0,0,0,.34);
+  --qr-btn-ring:rgba(255,255,255,.06);
   /* Component expression tokens (theme-agnostic behavior layer) */
   --qr-control-radius:14px;
   --qr-control-press-scale:.992;
@@ -676,18 +1163,18 @@ body {
 .fp-left,.fp-right{display:flex;align-items:center;gap:8px}
 .fp-right{justify-content:flex-end;min-width:0;overflow:auto}
 .fp-left{min-width:0;overflow:auto}
-.fp-btn{border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));background:var(--qr-btn-bg,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023);border-radius:999px;padding:7px 13px;min-height:var(--qr-btn-h-md);cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;line-height:1.2;box-shadow:var(--qr-control-rest-shadow);transform:translateY(0);transition:background .18s ease,border-color .18s ease,box-shadow .2s ease,transform .12s ease,opacity .15s ease}
-.fp-btn:hover{background:var(--qr-btn-hover-bg);border-color:var(--qr-btn-hover-border);box-shadow:var(--qr-control-hover-shadow);transform:translateY(var(--qr-control-lift))}
-.fp-btn:active{transform:translateY(0) scale(var(--qr-control-press-scale))}
+.fp-btn{border:none;background:color-mix(in srgb,var(--qr-btn-bg,var(--qr-bg-3,#fff)) 94%, #fff 6%);color:var(--qr-text-1,#1f2023);border-radius:999px;padding:7px 13px;min-height:var(--qr-btn-h-md);cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;line-height:1.2;box-shadow:0 0 0 1px var(--qr-btn-ring),0 2px 8px rgba(0,0,0,.16);transform:translateY(0);transition:background .18s ease,box-shadow .2s ease,transform .12s ease,opacity .15s ease,filter .16s ease}
+.fp-btn:hover{background:color-mix(in srgb,var(--qr-btn-hover-bg,#fff) 96%, #fff 4%);box-shadow:0 0 0 1px color-mix(in srgb,var(--qr-btn-ring) 78%, #fff 22%),0 4px 12px rgba(0,0,0,.20);transform:translateY(0);filter:brightness(1.015)}
+.fp-btn:active{transform:translateY(0) scale(.99);box-shadow:0 0 0 1px color-mix(in srgb,var(--qr-btn-ring) 70%, #fff 30%),0 1px 4px rgba(0,0,0,.14)}
 .fp-btn:focus-visible{outline:none;box-shadow:var(--qr-control-focus-shadow)}
 .fp-btn:disabled{opacity:.48;cursor:not-allowed;transform:none;box-shadow:none}
-.fp-btn.primary{background:var(--qr-accent);border-color:var(--qr-accent);color:var(--qr-text-on-accent)}
+.fp-btn.primary{background:color-mix(in srgb,var(--qr-accent) 92%, #fff 8%);color:var(--qr-text-on-accent)}
 .fp-btn.icon-only{padding:6px 8px;min-height:var(--qr-btn-h-sm);min-width:var(--qr-btn-h-sm);display:inline-flex;align-items:center;justify-content:center}
 .fp-top .fp-btn{min-height:var(--qr-btn-h-sm);padding:6px 11px}
 .fp-top .fp-btn.icon-only{padding:6px 8px}
-.fp-top .fp-btn{box-shadow:0 1px 2px rgba(12,16,22,.10)}
-.fp-top .fp-btn:hover{box-shadow:0 2px 6px rgba(12,16,22,.14);transform:translateY(0)}
-.fp-top .fp-btn:active{box-shadow:0 1px 2px rgba(12,16,22,.08)}
+.fp-top .fp-btn{box-shadow:0 0 0 1px var(--qr-btn-ring),0 2px 8px rgba(12,16,22,.16)}
+.fp-top .fp-btn:hover{box-shadow:0 0 0 1px color-mix(in srgb,var(--qr-btn-ring) 78%, #fff 22%),0 4px 12px rgba(12,16,22,.22);transform:translateY(0)}
+.fp-top .fp-btn:active{box-shadow:0 0 0 1px color-mix(in srgb,var(--qr-btn-ring) 70%, #fff 30%),0 1px 5px rgba(12,16,22,.15)}
 .fp-btn .fp-ico{width:14px;height:14px;display:inline-block;vertical-align:-2px;margin-right:6px}
 .fp-btn.icon-only .fp-ico{margin-right:0}
 .fp-title{font-weight:800;font-size:14px;letter-spacing:.2px;color:inherit;white-space:nowrap}
@@ -739,19 +1226,30 @@ body {
 .fp-path-link:last-child{font-weight:700;color:var(--qr-text-1)}
 .fp-body{flex:1;display:flex;min-height:0}
 .fp-sidebar{display:flex;flex-direction:column;border-right:1px solid var(--qr-sidebar-border);background:var(--qr-sidebar-bg);min-width:220px;max-width:520px}
-.fp-side-head{display:flex;gap:6px;padding:10px;border-bottom:1px solid var(--qr-border-2);align-items:center}
+.fp-side-head{display:flex;padding:10px;border-bottom:1px solid var(--qr-border-2);align-items:center}
+.fp-side-search{display:flex;align-items:stretch;gap:0;flex:1;min-width:0;min-height:40px;padding:2px 2px 2px 12px;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));border-radius:12px;background:var(--qr-bg-input,var(--qr-bg-3,#fff));box-shadow:var(--qr-control-rest-shadow);overflow:hidden;transition:border-color .16s ease,box-shadow .18s ease,background .16s ease}
+.fp-side-search:focus-within{border-color:var(--qr-accent);background:var(--qr-btn-hover-bg);box-shadow:var(--qr-control-focus-shadow)}
 .fp-side-head .fp-input{flex:1;min-width:0}
-.fp-tree-tools{display:flex;gap:4px;align-items:center;flex:none}
-.fp-tree-tool-btn{width:24px;height:24px;padding:0;min-height:24px;border-radius:8px;border:1px solid var(--qr-border-2);background:transparent;color:var(--qr-text-2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:none;transition:border-color .15s ease,background .15s ease,color .15s ease,transform .12s ease}
-.fp-tree-tool-btn:hover{border-color:var(--qr-btn-hover-border);background:var(--qr-bg-hover);color:var(--qr-text-1)}
-.fp-tree-tool-btn:active{transform:scale(.96)}
-.fp-tree-tool-btn .fp-ico{width:12px;height:12px}
+.fp-side-search-input{border:none!important;background:transparent!important;box-shadow:none!important;border-radius:0!important;outline:none!important;appearance:none!important;min-height:36px!important;padding:8px 0!important;transform:none!important}
+.fp-side-search-input:focus{border:none!important;background:transparent!important;box-shadow:none!important;outline:none!important;transform:none!important}
+.fp-tree-tools{display:flex;align-items:stretch;flex:none;padding:0;margin-left:6px}
+.fp-tree-tool-btn{width:36px;height:36px;padding:0;min-height:36px;border-radius:0 10px 10px 0;border:none;background:transparent;color:var(--qr-text-2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:none;transition:background .15s ease,color .15s ease,transform .12s ease}
+.fp-tree-tool-btn:hover{background:var(--qr-bg-hover);color:var(--qr-text-1)}
+.fp-tree-tool-btn:active{transform:translateY(1px)}
+.fp-tree-tool-btn .fp-ico{width:13px;height:13px}
 .fp-input{width:100%;padding:9px 14px;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));border-radius:var(--qr-control-radius);min-height:var(--qr-control-min-h);background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023);box-shadow:none;transition:border-color .16s ease,box-shadow .18s ease,transform .12s ease,background .16s ease}
 .fp-input::placeholder{color:var(--qr-placeholder)}
 #${OVERLAY_ID} input:not([type="checkbox"]):not([type="radio"]),#${OVERLAY_ID} textarea,#${OVERLAY_ID} select{background:var(--qr-bg-input,var(--qr-bg-3,#fff))!important;color:var(--qr-text-1,#1f2023)!important;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28))!important;border-radius:var(--qr-control-radius)!important;min-height:var(--qr-control-min-h)!important;box-shadow:none!important;outline:none!important;padding:9px 14px!important;transition:border-color .16s ease,box-shadow .18s ease,transform .12s ease,background .16s ease}
 #${OVERLAY_ID} select{appearance:none!important;-webkit-appearance:none!important;-moz-appearance:none!important;padding-right:38px!important;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4.2 6.2 8 10l3.8-3.8' stroke='%23939aa8' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")!important;background-repeat:no-repeat!important;background-position:right 12px center!important;background-size:12px 12px!important}
+#${OVERLAY_ID} .fp-worldbook-select-wrap{position:relative;display:flex;align-items:center;min-width:220px;max-width:320px;flex:1}
+#${OVERLAY_ID} .fp-worldbook-select-wrap > select{width:100%;padding-right:34px!important;background-image:none!important}
+#${OVERLAY_ID} .fp-worldbook-select-wrap .fp-worldbook-chevron{position:absolute;right:11px;top:50%;width:14px;height:14px;transform:translateY(-50%) rotate(0deg);transform-origin:center;pointer-events:none;color:var(--qr-text-2);transition:transform .18s ease,color .18s ease}
+#${OVERLAY_ID} .fp-worldbook-select-wrap:focus-within .fp-worldbook-chevron,#${OVERLAY_ID} .fp-worldbook-select-wrap.is-open .fp-worldbook-chevron{transform:translateY(-50%) rotate(180deg);color:var(--qr-text-1)}
 #${OVERLAY_ID} input:not([type="checkbox"]):not([type="radio"])::placeholder,#${OVERLAY_ID} textarea::placeholder{color:var(--qr-placeholder)!important}
-#${OVERLAY_ID} input:not([type="checkbox"]):not([type="radio"]):focus,#${OVERLAY_ID} textarea:focus,#${OVERLAY_ID} select:focus{border-color:var(--qr-accent)!important;background:var(--qr-btn-hover-bg)!important;box-shadow:var(--qr-control-focus-shadow)!important;transform:translateY(var(--qr-control-lift))}
+#${OVERLAY_ID} input:not([type="checkbox"]):not([type="radio"]):focus,#${OVERLAY_ID} textarea:focus{border-color:var(--qr-accent)!important;background:var(--qr-btn-hover-bg)!important;box-shadow:var(--qr-control-focus-shadow)!important;transform:translateY(var(--qr-control-lift))}
+#${OVERLAY_ID} select:focus{border-color:var(--qr-accent)!important;background-color:var(--qr-btn-hover-bg)!important;box-shadow:var(--qr-control-focus-shadow)!important;transform:translateY(var(--qr-control-lift));background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4.2 6.2 8 10l3.8-3.8' stroke='%23939aa8' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")!important;background-repeat:no-repeat!important;background-position:right 12px center!important;background-size:12px 12px!important}
+#${OVERLAY_ID} input.fp-side-search-input:not([type="checkbox"]):not([type="radio"]){border:none!important;background:transparent!important;box-shadow:none!important;border-radius:0!important;outline:none!important;appearance:none!important;min-height:36px!important;padding:8px 0!important}
+#${OVERLAY_ID} input.fp-side-search-input:not([type="checkbox"]):not([type="radio"]):focus{border:none!important;background:transparent!important;box-shadow:none!important;outline:none!important;transform:none!important}
 #${OVERLAY_ID} input:-webkit-autofill,#${OVERLAY_ID} input:-webkit-autofill:hover,#${OVERLAY_ID} input:-webkit-autofill:focus,#${OVERLAY_ID} textarea:-webkit-autofill,#${OVERLAY_ID} select:-webkit-autofill{-webkit-text-fill-color:var(--qr-text-1)!important;box-shadow:0 0 0 1000px var(--qr-bg-input) inset!important;transition:background-color 9999s ease-in-out 0s}
 .fp-tree{padding:8px;overflow:auto;flex:1}
 .fp-sidebar-foot{display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 10px;border-top:1px solid var(--qr-border-2);color:var(--qr-text-2);font-size:11px;text-align:center}
@@ -780,10 +1278,13 @@ body {
 .fp-fav-badge{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:999px;background:rgba(224,80,112,.14);border:1px solid rgba(224,80,112,.55);color:var(--qr-fav-color);box-shadow:0 2px 8px rgba(224,80,112,.28)}
 .fp-fav-badge svg{width:12px;height:12px;display:block}
 .fp-bottom{border-top:1px solid var(--qr-topbar-border);background:var(--qr-bottom-bg);display:flex;flex-direction:column;transition:height .25s ease}
+.fp-bottom.is-resizing{transition:none}
 .fp-bottom.collapsed{height:auto!important}
 .fp-bottom.collapsed .fp-preview{display:none}
 .fp-bottom-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;font-size:12px;color:var(--qr-text-2)}
-.fp-bottom-head [data-clear-preview]{min-height:28px;padding:4px 10px;font-size:12px}
+.fp-bottom-actions{display:flex;align-items:center;gap:8px}
+.fp-preview-btn{min-height:34px;padding:0 12px;font-size:12px;border-radius:999px}
+.fp-preview-btn.icon-only{min-width:34px;width:34px;padding:0}
 .fp-preview{overflow:auto;padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px}
 .fp-token{position:relative;font-size:13px;border-radius:999px;padding:5px 32px 5px 12px;border:1px solid transparent;display:inline-flex;align-items:center;cursor:grab;user-select:none;transition:transform .15s ease,opacity .15s ease}
 .fp-token:active{cursor:grabbing}
@@ -822,6 +1323,79 @@ body {
 .fp-edit-item-card{width:min(560px,92vw);min-height:min(70vh,700px);max-height:min(82vh,760px)}
 .fp-edit-scroll{flex:1;min-height:0;overflow-y:auto;padding-right:4px;scrollbar-gutter:stable}
 .fp-edit-item-card [data-content]{min-height:250px;height:250px}
+.fp-content-editor{position:relative;flex:1;min-width:0}
+.fp-content-editor [data-content]{padding-bottom:40px}
+.fp-qr-gen-btn{position:absolute;right:10px;bottom:10px;z-index:2;border:none;background:transparent;box-shadow:none;padding:0;min-height:auto;line-height:1;color:var(--qr-accent);cursor:pointer;transition:transform .16s ease,filter .16s ease,opacity .16s ease}
+.fp-qr-gen-btn .fp-ico{width:20px;height:20px;display:block}
+.fp-qr-gen-btn:hover{transform:translateY(-1px) scale(1.08);filter:drop-shadow(0 0 7px color-mix(in srgb,var(--qr-accent) 70%, transparent))}
+.fp-qr-gen-btn.is-loading{animation:fp-qr-gen-pulse .95s ease-in-out infinite}
+.fp-qr-gen-btn:disabled{opacity:.55;cursor:not-allowed;transform:none;filter:none}
+.fp-qr-undo-btn{position:absolute;right:40px;bottom:10px;z-index:2;border:none;background:transparent;box-shadow:none;padding:0;min-height:auto;line-height:1;color:var(--qr-accent);cursor:pointer;transition:transform .16s ease,filter .16s ease,opacity .16s ease}
+.fp-qr-undo-btn .fp-ico{width:19px;height:19px;display:block}
+.fp-qr-undo-btn:hover{transform:translateY(-1px) scale(1.08);filter:drop-shadow(0 0 6px color-mix(in srgb,var(--qr-accent) 66%, transparent))}
+.fp-qr-undo-btn:disabled{opacity:.55;cursor:not-allowed;transform:none;filter:none}
+.fp-qr-gen-status{margin:-4px 0 8px 106px;font-size:12px;color:var(--qr-text-2);line-height:1.45;min-height:18px}
+.fp-qr-section{border:1px solid var(--qr-border-2);border-radius:12px;padding:10px 12px;background:color-mix(in srgb,var(--qr-bg-2) 72%, var(--qr-bg-3) 28%)}
+.fp-qr-section-title{font-size:12px;font-weight:800;color:var(--qr-text-1);margin-bottom:8px}
+.fp-qr-grid{display:grid;grid-template-columns:1fr;gap:10px}
+.fp-qr-inline{display:flex;gap:8px;align-items:center}
+.fp-qr-inline .fp-btn{white-space:nowrap}
+.fp-qr-preset-shell{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+.fp-qr-card{border:1px solid var(--qr-border-2);border-radius:12px;padding:10px;background:color-mix(in srgb,var(--qr-bg-input) 50%, var(--qr-bg-3) 50%)}
+.fp-qr-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+.fp-qr-card-title{font-size:12px;font-weight:800;color:var(--qr-text-1)}
+.fp-qr-seg-list{display:flex;flex-direction:column;gap:6px}
+.fp-qr-seg-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 10px;border:1px solid var(--qr-border-2);border-radius:10px;background:var(--qr-bg-input)}
+.fp-qr-seg-main{min-width:0;display:flex;align-items:center}
+.fp-qr-seg-note{font-size:13px;font-weight:700;color:var(--qr-text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fp-qr-seg-ops{display:flex;gap:6px;align-items:center}
+.fp-qr-seg-ops .fp-btn{padding:0;min-height:28px;min-width:28px;width:28px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center}
+.fp-qr-seg-ops .fp-btn .fp-ico{margin-right:0;width:13px;height:13px}
+.fp-qr-drag-handle{cursor:grab}
+.fp-qr-drag-handle:active{cursor:grabbing}
+.fp-debug-console{width:100%;min-height:420px;max-height:62vh;background:#07090d!important;color:#8dfc9b!important;border:1px solid #1c232e!important;border-radius:12px!important;padding:12px!important;font:12px/1.55 "Cascadia Mono","Consolas","Courier New",monospace;white-space:pre-wrap;word-break:break-word;overflow:auto;box-shadow:inset 0 0 0 1px rgba(255,255,255,.02)}
+.fp-debug-console::selection{background:rgba(141,252,155,.25);color:#eaffee}
+.fp-debug-console{user-select:text;cursor:text}
+.fp-preview-ta{padding:12px 14px!important;border-radius:12px!important;border:1px solid color-mix(in srgb,var(--qr-btn-border) 82%, #fff 18%)!important;background:color-mix(in srgb,var(--qr-bg-input) 86%, #fff 14%)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.35), inset 0 -1px 0 rgba(0,0,0,.04);line-height:1.55;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--qr-accent) 42%, #9aa4b2 58%) transparent}
+.fp-preview-ta::-webkit-scrollbar{width:10px;height:10px}
+.fp-preview-ta::-webkit-scrollbar-track{background:transparent;border-left:1px solid color-mix(in srgb,var(--qr-border-2) 76%, transparent 24%)}
+.fp-preview-ta::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--qr-accent) 40%, #9aa4b2 60%);border-radius:999px;border:2px solid transparent;background-clip:padding-box}
+.fp-preview-ta::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--qr-accent) 56%, #8d97a5 44%)}
+.fp-seg-edit-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;margin-bottom:8px}
+.fp-seg-edit-grid .fp-row{margin-bottom:0}
+.fp-seg-edit-grid .fp-row>label{width:52px}
+@media (max-width:760px){
+  .fp-seg-edit-grid{grid-template-columns:1fr}
+}
+.fp-qr-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.fp-qr-toolbar .fp-btn{min-height:32px}
+.fp-qr-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.fp-qr-params-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 10px}
+.fp-qr-param-item{display:flex;flex-direction:column;gap:4px}
+.fp-qr-param-item label{font-size:12px;color:var(--qr-text-2)}
+.fp-qr-preset-workbench{display:flex;flex-direction:column;gap:10px}
+.fp-qr-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fp-qr-bar .fp-btn{min-height:32px}
+.fp-qr-bar .fp-select{flex:1;min-width:180px}
+.fp-qr-bar .fp-select{padding:10px 38px 10px 12px;border-radius:12px;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023);appearance:none;-webkit-appearance:none;-moz-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4.2 6.2 8 10l3.8-3.8' stroke='%23939aa8' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:12px 12px}
+.fp-qr-field{display:flex;flex-direction:column;gap:6px}
+.fp-qr-field label{font-size:12px;font-weight:700;color:var(--qr-text-2)}
+.fp-qr-field input,.fp-qr-field textarea,.fp-qr-field select{width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023)}
+.fp-qr-field textarea{min-height:104px;resize:vertical;line-height:1.5}
+.fp-qr-fields-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.fp-qr-fields-2 .fp-qr-field textarea{min-height:132px}
+.fp-qr-inline-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.fp-qr-divider{height:1px;background:var(--qr-border-2);margin:2px 0}
+.fp-qr-note{font-size:12px;color:var(--qr-text-2)}
+@media (max-width:860px){
+  .fp-qr-params-grid{grid-template-columns:1fr}
+  .fp-qr-fields-2{grid-template-columns:1fr}
+}
+@media (max-width:700px){
+  .fp-qr-seg-row{grid-template-columns:1fr}
+  .fp-qr-seg-ops{justify-content:flex-end;flex-wrap:wrap}
+  .fp-qr-bar .fp-select{min-width:0}
+}
 .fp-modal-title{font-weight:800;font-size:15px;margin-bottom:10px}
 .fp-settings-shell{display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px;flex:1;min-height:0;overflow:hidden}
 .fp-settings-nav{display:flex;flex-direction:column;gap:4px;padding:2px 10px 2px 0;border-right:1px solid var(--qr-card-border)}
@@ -838,6 +1412,13 @@ body {
 .fp-row > label{width:98px;font-size:12px;color:var(--qr-row-label)}
 .fp-row > input,.fp-row > textarea,.fp-row > select{flex:1;padding:9px 14px;border-radius:var(--qr-control-radius);border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023)}
 .fp-row > select{appearance:none;-webkit-appearance:none;-moz-appearance:none;padding-right:38px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4.2 6.2 8 10l3.8-3.8' stroke='%23939aa8' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:12px 12px}
+.fp-ph-top{display:flex;flex-direction:column;gap:8px;margin-bottom:8px}
+.fp-row.fp-ph-top-row{align-items:flex-start;margin-bottom:0}
+.fp-row.fp-ph-top-row > label{padding-top:8px}
+.fp-ph-top-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.fp-ph-top-line{display:flex;gap:8px;align-items:center;min-width:0}
+.fp-ph-auto-spacer{width:88px;flex:0 0 88px;visibility:hidden;pointer-events:none}
+.fp-ph-meta{font-size:12px;color:var(--qr-text-2)}
 .fp-row.fp-row-block{align-items:flex-start}
 .fp-row.fp-row-block > label{padding-top:8px}
 .fp-ph-field{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0}
@@ -864,6 +1445,20 @@ body {
 .fp-cat-opt:hover{background:var(--qr-menu-hover)}
 .fp-cat-opt.active{border-color:var(--qr-accent);background:color-mix(in srgb,var(--qr-menu-hover) 72%, var(--qr-accent) 28%)}
 .fp-cat-empty{padding:8px 10px;color:var(--qr-text-2);font-size:12px}
+.fp-multi-picker{position:relative;flex:1;min-width:0}
+.fp-multi-trigger{width:100%;min-height:36px;padding:6px 30px 6px 10px;border:1px solid var(--qr-btn-border);border-radius:10px;background:var(--qr-bg-input);color:var(--qr-text-1);text-align:left;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;font-size:12px;line-height:1.35}
+.fp-multi-trigger:hover{border-color:var(--qr-btn-hover-border);background:var(--qr-btn-hover-bg)}
+.fp-multi-trigger .fp-ico{position:absolute;right:9px;top:50%;transform:translateY(-50%) rotate(0deg);width:12px;height:12px;opacity:.72;margin-right:0;transition:transform .18s ease,color .18s ease}
+.fp-multi-picker.open .fp-multi-trigger .fp-ico{transform:translateY(-50%) rotate(180deg)}
+.fp-multi-text{display:block;overflow:hidden;text-overflow:ellipsis}
+.fp-multi-picker.open .fp-multi-trigger{border-color:var(--qr-accent);box-shadow:var(--qr-control-focus-shadow)}
+.fp-multi-panel{position:absolute;left:0;right:0;top:calc(100% + 5px);display:none;z-index:90;border:1px solid var(--qr-menu-border);border-radius:10px;background:var(--qr-menu-bg);box-shadow:0 8px 20px rgba(0,0,0,.20);padding:6px}
+.fp-multi-picker.open .fp-multi-panel{display:block}
+.fp-multi-panel-list{max-height:184px;overflow:auto;display:flex;flex-direction:column;gap:2px}
+.fp-multi-opt{display:flex;align-items:center;gap:7px;width:100%;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--qr-text-1);padding:6px 8px;text-align:left;cursor:pointer;font-size:12px;line-height:1.35}
+.fp-multi-opt:hover{background:var(--qr-menu-hover)}
+.fp-multi-opt.active{border-color:var(--qr-accent);background:color-mix(in srgb,var(--qr-menu-hover) 72%, var(--qr-accent) 28%)}
+.fp-multi-opt input{pointer-events:none;width:13px;height:13px;margin:0;accent-color:var(--qr-accent)}
 .fp-color-picker{position:relative;display:inline-flex;align-items:center}
 .fp-color-trigger{width:28px;height:28px;border-radius:50%;border:1px solid var(--qr-btn-border);background:var(--qr-bg-3);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:var(--qr-control-inset-shadow),var(--qr-control-rest-shadow);padding:0;transition:border-color .15s ease,box-shadow .15s ease,transform .1s ease}
 .fp-color-trigger:hover{border-color:var(--qr-btn-hover-border);box-shadow:var(--qr-control-inset-shadow),var(--qr-control-hover-shadow)}
@@ -876,9 +1471,10 @@ body {
 .fp-color-opt.active{border-color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.2)}
 .fp-color-opt .fp-color-dot{width:14px;height:14px}
 .fp-row > textarea{min-height:90px;resize:vertical}
+.fp-settings-card [data-custom-css]{min-height:240px;height:240px}
 .fp-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px;flex-shrink:0}
-.fp-actions button{padding:8px 14px;border-radius:999px;min-height:var(--qr-btn-h-lg);border:1px solid var(--qr-btn-border);background:var(--qr-bg-3);color:var(--qr-text-1);cursor:pointer;font-weight:600;box-shadow:var(--qr-control-inset-shadow),var(--qr-control-rest-shadow);transition:background .18s ease,border-color .18s ease,box-shadow .2s ease,transform .12s ease}
-.fp-actions button:hover{border-color:var(--qr-btn-hover-border);box-shadow:var(--qr-control-inset-shadow),var(--qr-control-hover-shadow);transform:translateY(var(--qr-control-lift))}
+.fp-actions button{padding:8px 14px;border-radius:999px;min-height:var(--qr-btn-h-lg);border:none;background:color-mix(in srgb,var(--qr-btn-bg,var(--qr-bg-3,#fff)) 94%, #fff 6%);color:var(--qr-text-1);cursor:pointer;font-weight:600;box-shadow:0 0 0 1px var(--qr-btn-ring),0 2px 8px rgba(0,0,0,.16);transition:background .18s ease,box-shadow .2s ease,transform .12s ease,filter .16s ease}
+.fp-actions button:hover{box-shadow:0 0 0 1px color-mix(in srgb,var(--qr-btn-ring) 78%, #fff 22%),0 4px 12px rgba(0,0,0,.20);transform:translateY(0);filter:brightness(1.015)}
 .fp-actions button:active{transform:translateY(0) scale(var(--qr-control-press-scale))}
 .fp-actions button:focus-visible{outline:none;box-shadow:var(--qr-control-inset-shadow),var(--qr-control-focus-shadow)}
 .fp-actions button.primary{background:var(--qr-accent);border-color:var(--qr-accent);color:var(--qr-text-on-accent)}
@@ -1446,6 +2042,7 @@ body {
 @keyframes fp-toast-in{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:translateY(0)}}
 @keyframes fp-menu-pop{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
 @keyframes fp-tab-fadein{from{opacity:0}to{opacity:1}}
+@keyframes fp-qr-gen-pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.16);opacity:.7}}
 .fp-tab.active{animation:fp-tab-fadein .2s ease}
 @media (max-width: 900px){
   .fp-top{grid-template-columns:1fr;gap:8px}
@@ -1486,6 +2083,7 @@ body {
   }
 
   function toast(message: string): void {
+    logInfo(`TOAST ${String(message || '操作已执行')}`);
     const c = ensureToastContainer();
     const max = Math.max(1, Number(state.pack?.settings?.toast?.maxStack || 4));
     const timeout = Math.max(600, Number(state.pack?.settings?.toast?.timeout || 1800));
@@ -1535,12 +2133,752 @@ body {
     return res;
   }
 
+  function detectCurrentCharacterState(): { characterId: string | null; characterName: string; isGroupChat: boolean } {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ctx = getContext() as any;
+    const groupId = String(ctx?.groupId ?? (pW as any)?.SillyTavern?.groupId ?? '').trim();
+    const isGroupChat = Boolean(groupId);
+    if (isGroupChat) return { characterId: null, characterName: '群聊', isGroupChat: true };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const card = (typeof getCharData === 'function' ? (getCharData('current') as any) : null) || null;
+    const characterId = String(card?.avatar || card?.name || '').trim() || null;
+    let characterName = String(card?.name || '').trim();
+    if (!characterName) {
+      try {
+        if (typeof substitudeMacros === 'function') characterName = String(substitudeMacros('{{char}}') || '').trim();
+      } catch (e) {}
+    }
+    return { characterId, characterName: characterName || '当前角色', isGroupChat: false };
+  }
+
+  function getCurrentRolePlaceholderMap(createIfMissing = false): Record<string, string> | null {
+    if (!state.pack || state.activeIsGroupChat || !state.activeCharacterId) return null;
+    const maps = state.pack.settings.placeholderRoleMaps.byCharacterId;
+    if (!maps[state.activeCharacterId] && createIfMissing) maps[state.activeCharacterId] = {};
+    return maps[state.activeCharacterId] || null;
+  }
+
+  function getEffectivePlaceholderValues(
+    placeholders: Record<string, string>,
+    roleValues: Record<string, string> | null,
+  ): Record<string, string> {
+    const merged: Record<string, string> = {};
+    for (const [k, v] of Object.entries(placeholders || {})) merged[k] = String(v ?? '');
+    if (!roleValues) return merged;
+    for (const [k, v] of Object.entries(roleValues || {})) {
+      if (v !== undefined && String(v).length > 0) merged[k] = String(v);
+    }
+    return merged;
+  }
+
+  function syncActiveCharacterMapping(opts?: { silent?: boolean; force?: boolean }): void {
+    if (!state.pack) return;
+    const prevKey = state.activeCharacterSwitchKey;
+    const prevName = state.activeCharacterName;
+    const detected = detectCurrentCharacterState();
+    const nextKey = detected.isGroupChat ? '__group__' : (detected.characterId ? `char:${detected.characterId}` : '__default__');
+    const changed = opts?.force || nextKey !== prevKey || detected.characterName !== prevName;
+
+    state.activeCharacterId = detected.characterId;
+    state.activeCharacterName = detected.characterName;
+    state.activeIsGroupChat = detected.isGroupChat;
+    state.activeCharacterSwitchKey = nextKey;
+
+    if (detected.characterId) {
+      const meta = state.pack.settings.placeholderRoleMaps.characterMeta[detected.characterId] || { name: '', lastSeenAt: '' };
+      meta.name = detected.characterName || meta.name || detected.characterId;
+      meta.lastSeenAt = nowIso();
+      state.pack.settings.placeholderRoleMaps.characterMeta[detected.characterId] = meta;
+      if (!state.pack.settings.placeholderRoleMaps.byCharacterId[detected.characterId]) {
+        state.pack.settings.placeholderRoleMaps.byCharacterId[detected.characterId] = {};
+      }
+    }
+
+    if (changed && !opts?.silent) {
+      if (detected.isGroupChat) toast('已切换到群聊模式，占位符使用默认值');
+      else toast(`已切换占位符映射：${detected.characterName || '当前角色'}`);
+    }
+  }
+
+  function getCurrentCharacterBoundWorldbookNames(): string[] {
+    if (state.activeIsGroupChat) return [];
+    if (typeof getCharWorldbookNames !== 'function') return [];
+    try {
+      const worldbooks = getCharWorldbookNames('current');
+      const names = [
+        String(worldbooks?.primary || '').trim(),
+        ...(Array.isArray(worldbooks?.additional) ? worldbooks.additional.map((x) => String(x || '').trim()) : []),
+      ].filter(Boolean);
+      return [...new Set(names)];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function getAllWorldbookNamesSafe(): string[] {
+    if (typeof getWorldbookNames !== 'function') return [];
+    try {
+      const names = getWorldbookNames() || [];
+      return [...new Set(names.map((n) => String(n || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function getExistingCharacterCardsSafe(): Array<{ id: string; name: string }> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = new Map<string, { id: string; name: string }>();
+    const addOne = (raw: any) => {
+      const id = String(raw?.avatar || raw?.id || raw?.name || '').trim();
+      if (!id) return;
+      const name = String(raw?.name || raw?.avatar || id).trim() || id;
+      if (!result.has(id)) result.set(id, { id, name });
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const addMany = (data: any) => {
+      if (!data) return;
+      if (Array.isArray(data)) {
+        data.forEach(addOne);
+        return;
+      }
+      if (typeof data === 'object') {
+        // 兼容 { id: card } 或其他字典形态
+        for (const [k, v] of Object.entries(data)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const card = (v as any) || {};
+          if (!card.avatar && k) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            addOne({ ...(card as any), avatar: k });
+          } else addOne(card);
+        }
+      }
+    };
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const allByApi = typeof getCharData === 'function' ? (getCharData('all') as any) : null;
+      addMany(allByApi);
+    } catch (e) {}
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = getContext() as any;
+      addMany(ctx?.characters);
+      addMany(ctx?.characterList);
+      addMany(ctx?.allCharacters);
+    } catch (e) {}
+
+    return Array.from(result.values()).sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
+  }
+
+  async function getWorldbookEntryOptionsByNames(names: string[]): Promise<Array<{ value: string; label: string }>> {
+    if (typeof getWorldbook !== 'function') return [];
+    try {
+      const uniqueNames = [...new Set((names || []).map((n) => String(n || '').trim()).filter(Boolean))];
+      const options: Array<{ value: string; label: string }> = [];
+      const seen = new Set<string>();
+      for (const wbName of uniqueNames) {
+        // eslint-disable-next-line no-await-in-loop
+        const entries = await getWorldbook(wbName);
+        for (const entry of entries || []) {
+          const itemName = String(entry?.name || '').trim();
+          if (!itemName) continue;
+          const key = itemName;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          options.push({ value: itemName, label: itemName });
+        }
+      }
+      return options.sort((a, b) => a.label.localeCompare(b.label, 'zh-Hans-CN'));
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function resolvePlaceholdersWithMap(
+    text: string,
+    placeholders: Record<string, string>,
+    roleValues?: Record<string, string> | null,
+  ): string {
+    return String(text || '').replace(/\{@([^:}]+)(?::([^}]*))?\}/g, (_, key: string, fallback: string) => {
+      const roleValue = roleValues?.[key];
+      if (roleValue !== undefined && String(roleValue).length > 0) return String(roleValue);
+      const defaultValue = placeholders[key];
+      if (defaultValue !== undefined && String(defaultValue).length > 0) return String(defaultValue);
+      return fallback !== undefined ? String(fallback) : '';
+    });
+  }
+
+  function splitMultiValue(raw: string): string[] {
+    return String(raw || '')
+      .split(/[,\n，、|｜]+/g)
+      .map((x) => String(x || '').trim())
+      .filter(Boolean);
+  }
+
+  function joinMultiValue(values: string[]): string {
+    return [...new Set((values || []).map((x) => String(x || '').trim()).filter(Boolean))].join('、');
+  }
+
   function resolvePlaceholders(text: string): string {
     const placeholders = state.pack?.settings?.placeholders || {};
-    return String(text || '').replace(/\{@([^:}]+)(?::([^}]*))?\}/g, (_, key: string, fallback: string) => {
-      const v = placeholders[key];
-      if (v !== undefined && String(v).length > 0) return String(v);
-      return fallback !== undefined ? String(fallback) : '';
+    const roleValues = getCurrentRolePlaceholderMap(false);
+    return resolvePlaceholdersWithMap(text, placeholders, roleValues);
+  }
+
+  function getRequestHeadersSafe(): Record<string, string> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const st = (pW as any)?.SillyTavern;
+      if (st?.getRequestHeaders) return st.getRequestHeaders();
+    } catch (e) {}
+    return {};
+  }
+
+  function normalizeApiBaseUrl(rawUrl: string): string {
+    let url = String(rawUrl || '').trim();
+    if (!url) return '';
+    url = url.replace(/\/+$/, '');
+    url = url.replace(/\/v\d+\/chat\/completions$/i, (m) => m.replace(/\/chat\/completions$/i, ''));
+    url = url.replace(/\/chat\/completions$/i, '');
+    url = url.replace(/\/completions$/i, '');
+    return url.replace(/\/+$/, '');
+  }
+
+  function buildApiBaseCandidates(rawUrl: string): string[] {
+    const input = String(rawUrl || '').trim().replace(/\/+$/, '');
+    if (!input) return [];
+    const normalized = normalizeApiBaseUrl(input);
+    const out = new Set<string>();
+    const add = (u: string) => {
+      const v = String(u || '').trim().replace(/\/+$/, '');
+      if (v) out.add(v);
+    };
+    add(input);
+    add(normalized);
+    if (normalized) {
+      if (/\/v\d+$/i.test(normalized)) {
+        add(normalized.replace(/\/v\d+$/i, ''));
+      } else {
+        add(`${normalized}/v1`);
+      }
+    }
+    return [...out];
+  }
+
+  function sanitizeLlmReqBodyForLog(reqBody: Record<string, unknown>): Record<string, unknown> {
+    const cloned = deepClone(reqBody || {});
+    const hdr = String((cloned.custom_include_headers as string) || '');
+    if (hdr) {
+      cloned.custom_include_headers = hdr.replace(/(Authorization:\s*Bearer\s+).+/i, '$1***');
+    }
+    return cloned;
+  }
+
+  function isPlainObject(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function parseLooseScalar(raw: string): unknown {
+    const text = String(raw || '').trim();
+    if (!text.length) return '';
+    if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith('\'') && text.endsWith('\''))) {
+      return text.slice(1, -1);
+    }
+    if (/^(true|false)$/i.test(text)) return text.toLowerCase() === 'true';
+    if (/^null$/i.test(text)) return null;
+    if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);
+    return text;
+  }
+
+  function parseSimpleYamlObject(raw: string): Record<string, unknown> {
+    const lines = String(raw || '').replace(/\r\n?/g, '\n').split('\n');
+    const root: Record<string, unknown> = {};
+    const stack: Array<{ indent: number; obj: Record<string, unknown> }> = [{ indent: -1, obj: root }];
+
+    for (const sourceLine of lines) {
+      const noComment = sourceLine.replace(/\s+#.*$/, '');
+      if (!noComment.trim()) continue;
+      const indent = (noComment.match(/^\s*/) || [''])[0].length;
+      const line = noComment.trim();
+      let sep = line.indexOf(':');
+      if (sep <= 0) sep = line.indexOf('：');
+      if (sep <= 0) throw new Error(`无效行：${sourceLine}`);
+      const key = line.slice(0, sep).trim();
+      const rest = line.slice(sep + 1).trim();
+      if (!key) throw new Error(`空键名：${sourceLine}`);
+
+      while (stack.length > 1 && indent <= stack[stack.length - 1].indent) stack.pop();
+      const parent = stack[stack.length - 1].obj;
+
+      if (!rest) {
+        const child: Record<string, unknown> = {};
+        parent[key] = child;
+        stack.push({ indent, obj: child });
+      } else {
+        parent[key] = parseLooseScalar(rest);
+      }
+    }
+
+    return root;
+  }
+
+  function parseAdditionalBodyParams(raw: string): Record<string, unknown> {
+    const text = String(raw || '').trim();
+    if (!text) return {};
+    try {
+      const parsed = JSON.parse(text);
+      if (!isPlainObject(parsed)) throw new Error('附加参数必须是对象');
+      return parsed;
+    } catch (e) {
+      const parsedYaml = parseSimpleYamlObject(text);
+      if (!isPlainObject(parsedYaml)) throw new Error('附加参数必须是对象');
+      return parsedYaml;
+    }
+  }
+
+  function mergeDeepRecord(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = { ...base };
+    for (const [key, value] of Object.entries(patch || {})) {
+      const prev = out[key];
+      if (isPlainObject(prev) && isPlainObject(value)) out[key] = mergeDeepRecord(prev, value);
+      else out[key] = value;
+    }
+    return out;
+  }
+
+  function getEffectivePlaceholderMapForLlm(): Record<string, string> {
+    const placeholders = state.pack?.settings?.placeholders || {};
+    const roleValues = getCurrentRolePlaceholderMap(false);
+    return getEffectivePlaceholderValues(placeholders, roleValues);
+  }
+
+  function getActiveQrLlmPreset(): QrLlmPreset {
+    const fallbackStore = buildDefaultQrLlmPresetStore();
+    const qrLlm = state.pack?.settings?.qrLlm;
+    if (!qrLlm) return fallbackStore.presets[Object.keys(fallbackStore.presets)[0]];
+    const name = qrLlm.activePresetName;
+    const preset = qrLlm.presetStore?.presets?.[name];
+    if (preset) return preset;
+    return fallbackStore.presets[Object.keys(fallbackStore.presets)[0]];
+  }
+
+  function applyLlmPresetTemplate(
+    template: string,
+    draft: string,
+    placeholderMap: Record<string, string>,
+  ): string {
+    const placeholderList = Object.keys(placeholderMap || {}).map((x) => `- ${x}`).join('\n') || '- (无)';
+    return String(template || '')
+      .replaceAll('{{draft}}', String(draft || ''))
+      .replaceAll('{{placeholder_list}}', placeholderList)
+      .replaceAll('{{placeholder_map_json}}', JSON.stringify(placeholderMap || {}, null, 2));
+  }
+
+  function extractContentFromGenerateJson(data: unknown): string {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyData = data as any;
+    if (!anyData || typeof anyData !== 'object') return '';
+    if (typeof anyData.response === 'string') return anyData.response;
+    const choices = Array.isArray(anyData.choices) ? anyData.choices : [];
+    const first = choices[0] || {};
+    const fromMessage = first?.message?.content;
+    const fromText = first?.text;
+    const fromDelta = first?.delta?.content;
+    if (typeof fromMessage === 'string') return fromMessage;
+    if (typeof fromText === 'string') return fromText;
+    if (typeof fromDelta === 'string') return fromDelta;
+    if (typeof anyData.content === 'string') return anyData.content;
+    if (typeof anyData.text === 'string') return anyData.text;
+    return '';
+  }
+
+  function buildOpenAiModelsUrl(apiBase: string): string {
+    const base = normalizeApiBaseUrl(apiBase);
+    if (!base) return '';
+    if (/\/v\d+$/i.test(base)) return `${base}/models`;
+    return `${base}/v1/models`;
+  }
+
+  function buildOpenAiChatCompletionsUrl(apiBase: string): string {
+    const base = normalizeApiBaseUrl(apiBase);
+    if (!base) return '';
+    if (/\/v\d+$/i.test(base)) return `${base}/chat/completions`;
+    return `${base}/v1/chat/completions`;
+  }
+
+  async function fetchModelsViaDirectOpenAi(apiBase: string, apiKey: string): Promise<string[]> {
+    const modelsUrl = buildOpenAiModelsUrl(apiBase);
+    if (!modelsUrl) return [];
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    pushDebugLog('实际API请求 直连模型列表', {
+      url: modelsUrl,
+      headers: { ...headers, Authorization: apiKey ? 'Bearer ***' : '' },
+    });
+    const res = await fetch(modelsUrl, { method: 'GET', headers });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`${res.status} ${res.statusText}${detail ? ` (${detail.slice(0, 120)})` : ''}`);
+    }
+    const data = await res.json();
+    const modelsRaw = Array.isArray(data?.models) ? data.models : (Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []));
+    const models: string[] = modelsRaw
+      .map((m: unknown) => (typeof m === 'string' ? m : String((m as { id?: string })?.id || '')))
+      .map((x: string) => String(x || '').trim())
+      .filter((x: string): x is string => Boolean(x));
+    return models;
+  }
+
+  async function fetchQrLlmModels(secret: QrLlmSecretConfig): Promise<string[]> {
+    const url = String(secret.url || '').trim();
+    if (!url) throw new Error('请先填写API URL');
+    const candidates = buildApiBaseCandidates(url);
+    const errors: string[] = [];
+
+    for (const apiBase of candidates) {
+      const body = {
+        reverse_proxy: apiBase,
+        proxy_password: '',
+        chat_completion_source: 'custom',
+        custom_url: apiBase,
+        custom_include_headers: secret.apiKey ? `Authorization: Bearer ${secret.apiKey}` : '',
+      };
+      pushDebugLog('实际API请求 /api/backends/chat-completions/status', sanitizeLlmReqBodyForLog(body));
+      try {
+        const res = await fetch('/api/backends/chat-completions/status', {
+          method: 'POST',
+          headers: { ...getRequestHeadersSafe(), 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const detail = await res.text().catch(() => '');
+          errors.push(`${apiBase} -> ${res.status} ${res.statusText}${detail ? ` (${detail.slice(0, 120)})` : ''}`);
+          continue;
+        }
+        const data = await res.json();
+        const modelsRaw = Array.isArray(data?.models) ? data.models : (Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []));
+        const models: string[] = modelsRaw
+          .map((m: unknown) => (typeof m === 'string' ? m : String((m as { id?: string })?.id || '')))
+          .map((x: string) => String(x || '').trim())
+          .filter((x: string): x is string => Boolean(x));
+        if (models.length) return [...new Set(models)];
+        errors.push(`${apiBase} -> 模型列表为空`);
+      } catch (e) {
+        errors.push(`${apiBase} -> ${String(e)}`);
+      }
+    }
+
+    // 某些服务在 status 过程中会先探测根路径，可能误报 403；兜底直连 OpenAI 模型列表接口
+    for (const apiBase of candidates) {
+      try {
+        const models = await fetchModelsViaDirectOpenAi(apiBase, secret.apiKey || '');
+        if (models.length) return [...new Set(models)];
+        errors.push(`${apiBase} -> 直连模型列表为空`);
+      } catch (e) {
+        errors.push(`${apiBase} -> 直连模型列表失败: ${String(e)}`);
+      }
+    }
+
+    throw new Error(`状态检查失败（已尝试: ${candidates.join(' , ')}）${errors.length ? ` | ${errors[0]}` : ''}`);
+  }
+
+  async function callQrLlmGenerate(
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+    opts: {
+      stream: boolean;
+      model: string;
+      params: QrLlmSettings['generationParams'];
+      secretOverride?: QrLlmSecretConfig;
+      signal?: AbortSignal;
+      onDelta?: (text: string) => void;
+    },
+  ): Promise<string> {
+    const secret = opts.secretOverride || getQrLlmSecretConfig();
+    const model = String(opts.model || secret.manualModelId || secret.model || '').trim();
+    if (!secret.url) throw new Error('API URL 未配置');
+    if (!model) throw new Error('模型ID未配置');
+    let extraBodyParams: Record<string, unknown> = {};
+    try {
+      extraBodyParams = parseAdditionalBodyParams(secret.extraBodyParamsText || '');
+    } catch (e) {
+      pushDebugLog('附加参数解析失败，已忽略本次附加参数', e instanceof Error ? e.message : String(e));
+      extraBodyParams = {};
+    }
+    const candidates = buildApiBaseCandidates(secret.url);
+    const errors: string[] = [];
+
+    for (const apiBase of candidates) {
+      const reqBodyBase = {
+        messages,
+        model,
+        temperature: Number(opts.params.temperature),
+        top_p: Number(opts.params.top_p),
+        max_tokens: Number(opts.params.max_tokens),
+        presence_penalty: Number(opts.params.presence_penalty),
+        frequency_penalty: Number(opts.params.frequency_penalty),
+        stream: Boolean(opts.stream),
+        chat_completion_source: 'custom',
+        reverse_proxy: apiBase,
+        custom_url: apiBase,
+        custom_include_headers: secret.apiKey ? `Authorization: Bearer ${secret.apiKey}` : '',
+      };
+      const reqBody = mergeDeepRecord(reqBodyBase as unknown as Record<string, unknown>, extraBodyParams);
+      pushDebugLog('实际API请求 /api/backends/chat-completions/generate', sanitizeLlmReqBodyForLog(reqBody));
+
+      try {
+        const res = await fetch('/api/backends/chat-completions/generate', {
+          method: 'POST',
+          headers: { ...getRequestHeadersSafe(), 'Content-Type': 'application/json' },
+          body: JSON.stringify(reqBody),
+          signal: opts.signal,
+        });
+        if (!res.ok) {
+          let detail = '';
+          try { detail = await res.text(); } catch (e) {}
+          pushDebugLog('AI请求失败', {
+            apiBase,
+            status: res.status,
+            statusText: res.statusText,
+            detail: detail ? detail.slice(0, 500) : '',
+          });
+          errors.push(`${apiBase} -> ${res.status} ${res.statusText}`);
+          continue;
+        }
+
+        if (!opts.stream || !res.body) {
+          const data = await res.json();
+          const text = extractContentFromGenerateJson(data);
+          if (!text) throw new Error('响应中未找到可用文本');
+          pushDebugLog('AI返回（非流式）', text);
+          return text;
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let out = '';
+        let sawSse = false;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split(/\r?\n/);
+          buffer = lines.pop() || '';
+          for (const lineRaw of lines) {
+            const line = String(lineRaw || '').trim();
+            if (!line) continue;
+            if (!line.startsWith('data:')) continue;
+            sawSse = true;
+            const dataText = line.slice(5).trim();
+            if (!dataText || dataText === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(dataText);
+              const delta =
+                String(parsed?.choices?.[0]?.delta?.content ?? '') ||
+                String(parsed?.choices?.[0]?.message?.content ?? '') ||
+                String(parsed?.text ?? '') ||
+                '';
+              if (delta) {
+                out += delta;
+                opts.onDelta?.(out);
+              }
+            } catch (e) {
+              // 有些后端可能混入非 JSON 心跳，忽略即可
+            }
+          }
+        }
+
+        if (out) {
+          pushDebugLog('AI返回（流式）', out);
+          return out;
+        }
+        const tail = `${buffer}${decoder.decode()}`.trim();
+        if (!sawSse && tail) {
+          try {
+            const parsed = JSON.parse(tail);
+            const text = extractContentFromGenerateJson(parsed);
+            if (text) {
+              pushDebugLog('AI返回（流式尾包）', text);
+              return text;
+            }
+          } catch (e) {}
+          pushDebugLog('AI返回（流式尾包原文）', tail);
+          return tail;
+        }
+        throw new Error('流式响应为空');
+      } catch (e) {
+        if (opts.signal?.aborted) throw e;
+        errors.push(`${apiBase} -> ${String(e)}`);
+      }
+    }
+
+    // 某些服务在酒馆后端代理路径下会触发额外探测，兜底直连 OpenAI 兼容接口
+    for (const apiBase of candidates) {
+      const directUrl = buildOpenAiChatCompletionsUrl(apiBase);
+      if (!directUrl) continue;
+      const directBodyBase = {
+        messages,
+        model,
+        temperature: Number(opts.params.temperature),
+        top_p: Number(opts.params.top_p),
+        max_tokens: Number(opts.params.max_tokens),
+        presence_penalty: Number(opts.params.presence_penalty),
+        frequency_penalty: Number(opts.params.frequency_penalty),
+        stream: Boolean(opts.stream),
+      };
+      const directBody = mergeDeepRecord(directBodyBase as unknown as Record<string, unknown>, extraBodyParams);
+      pushDebugLog('实际API请求 直连 /v1/chat/completions', {
+        url: directUrl,
+        headers: { Authorization: secret.apiKey ? 'Bearer ***' : '' },
+        body: directBody,
+      });
+      try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (secret.apiKey) headers.Authorization = `Bearer ${secret.apiKey}`;
+        const res = await fetch(directUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(directBody),
+          signal: opts.signal,
+        });
+        if (!res.ok) {
+          let detail = '';
+          try { detail = await res.text(); } catch (e) {}
+          pushDebugLog('AI直连请求失败', {
+            url: directUrl,
+            status: res.status,
+            statusText: res.statusText,
+            detail: detail ? detail.slice(0, 500) : '',
+          });
+          errors.push(`${directUrl} -> ${res.status} ${res.statusText}`);
+          continue;
+        }
+
+        if (!opts.stream || !res.body) {
+          const data = await res.json();
+          const text = extractContentFromGenerateJson(data);
+          if (!text) throw new Error('响应中未找到可用文本');
+          pushDebugLog('AI返回（直连非流式）', text);
+          return text;
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let out = '';
+        let sawSse = false;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split(/\r?\n/);
+          buffer = lines.pop() || '';
+          for (const lineRaw of lines) {
+            const line = String(lineRaw || '').trim();
+            if (!line) continue;
+            if (!line.startsWith('data:')) continue;
+            sawSse = true;
+            const dataText = line.slice(5).trim();
+            if (!dataText || dataText === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(dataText);
+              const delta =
+                String(parsed?.choices?.[0]?.delta?.content ?? '') ||
+                String(parsed?.choices?.[0]?.message?.content ?? '') ||
+                String(parsed?.text ?? '') ||
+                '';
+              if (delta) {
+                out += delta;
+                opts.onDelta?.(out);
+              }
+            } catch (e) {}
+          }
+        }
+
+        if (out) {
+          pushDebugLog('AI返回（直连流式）', out);
+          return out;
+        }
+        const tail = `${buffer}${decoder.decode()}`.trim();
+        if (!sawSse && tail) {
+          try {
+            const parsed = JSON.parse(tail);
+            const text = extractContentFromGenerateJson(parsed);
+            if (text) {
+              pushDebugLog('AI返回（直连流式尾包）', text);
+              return text;
+            }
+          } catch (e) {}
+          pushDebugLog('AI返回（直连流式尾包原文）', tail);
+          return tail;
+        }
+        throw new Error('流式响应为空');
+      } catch (e) {
+        if (opts.signal?.aborted) throw e;
+        errors.push(`${directUrl} -> ${String(e)}`);
+      }
+    }
+
+    throw new Error(`请求失败（已尝试: ${candidates.join(' , ')}）${errors.length ? ` - ${errors[0]}` : ''}`);
+  }
+
+  async function testQrLlmConnection(secret: QrLlmSecretConfig, modelOverride?: string): Promise<string> {
+    const model = String(modelOverride || secret.manualModelId || secret.model || '').trim();
+    if (!secret.url) throw new Error('请先填写API URL');
+    if (!model) throw new Error('请先选择或填写模型ID');
+    const text = await callQrLlmGenerate(
+      [
+        { role: 'system', content: '你是连通性测试助手。严格只输出小写字符串：ok。不得输出任何解释、思考、标点或多余字符。' },
+        { role: 'user', content: 'ok' },
+      ],
+      {
+        stream: false,
+        model,
+        secretOverride: secret,
+        params: {
+          temperature: 0.1,
+          top_p: 1,
+          max_tokens: 16,
+          presence_penalty: 0,
+          frequency_penalty: 0,
+        },
+      },
+    );
+    const normalized = String(text || '').trim().toLowerCase();
+    if (normalized === 'ok' || normalized.startsWith('ok')) return 'ok';
+    return normalized.slice(0, 20) || 'ok';
+  }
+
+  async function generateQrExpandedContent(
+    draft: string,
+    opts?: { onDelta?: (content: string) => void; signal?: AbortSignal },
+  ): Promise<string> {
+    if (!state.pack) throw new Error('数据未初始化');
+    const qrLlm = state.pack.settings.qrLlm;
+    const secret = getQrLlmSecretConfig();
+    const modelId = String(secret.manualModelId || secret.model || '').trim();
+    if (!secret.url) throw new Error('请先在设置中填写 API URL');
+    if (!modelId) throw new Error('请先在设置中选择或填写模型ID');
+
+    const placeholderMap = getEffectivePlaceholderMapForLlm();
+    const preset = getActiveQrLlmPreset();
+    const systemPrompt = String(preset.systemPrompt || '').trim() || '你是执行内容扩写助手。';
+    const userPromptTemplate = String(preset.userPromptTemplate || '').trim() || '{{draft}}';
+    const userPrompt = applyLlmPresetTemplate(userPromptTemplate, draft, placeholderMap);
+    const messageList: Array<{ role: 'system' | 'user'; content: string }> = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ];
+    return callQrLlmGenerate(messageList, {
+      stream: Boolean(qrLlm.enabledStream),
+      model: modelId,
+      params: qrLlm.generationParams,
+      signal: opts?.signal,
+      onDelta: opts?.onDelta,
     });
   }
 
@@ -1569,8 +2907,13 @@ body {
       braces: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6.1 2.7c-1.6 0-2.2.8-2.2 2.2v1.1c0 .8-.3 1.2-.9 1.5.6.3.9.7.9 1.5v1.1c0 1.4.6 2.2 2.2 2.2M9.9 2.7c1.6 0 2.2.8 2.2 2.2v1.1c0 .8.3 1.2.9 1.5-.6.3-.9.7-.9 1.5v1.1c0 1.4-.6 2.2-2.2 2.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
       link: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6.1 9.9 4.8 11.2a2.1 2.1 0 0 1-3-3L3.1 6.9a2.1 2.1 0 0 1 3 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="m9.9 6.1 1.3-1.3a2.1 2.1 0 0 1 3 3l-1.3 1.3a2.1 2.1 0 0 1-3 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M6.1 9.9h3.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
       wand: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m5 11 6.4-6.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="m10.6 3.3.7-.7M12.7 5.4l.7-.7M12.1 2.7h1.2M13.3 4.9h1.2M2.7 12.1h1.2M3.9 10.9h1.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+      trash: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.8 4.6h8.4M6.2 4.6V3.4h3.6v1.2M5.2 6.2v5.3M8 6.2v5.3M10.8 6.2v5.3" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path d="M4.8 4.6h6.4v7.2a1 1 0 0 1-1 1H5.8a1 1 0 0 1-1-1V4.6Z" stroke="currentColor" stroke-width="1.3"/></svg>',
+      sparkles: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.9 9.2 5l3.1 1.2-3.1 1.2L8 10.5 6.8 7.4 3.7 6.2 6.8 5 8 1.9Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="m12.2 9.6.6 1.5 1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6.6-1.5ZM3.2 10.1l.4 1 .9.4-.9.4-.4 1-.4-1-.9-.4.9-.4.4-1Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>',
+      undo: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6.2 4.1 3.4 6.8l2.8 2.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 6.8h4.3a3.7 3.7 0 1 1 0 7.4H5.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
       palette: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2.2a5.8 5.8 0 1 0 0 11.6h1.2a1.6 1.6 0 0 0 0-3.2H8.8a1 1 0 0 1 0-2h1.7a3.5 3.5 0 0 0 0-7H8Z" stroke="currentColor" stroke-width="1.4"/><circle cx="4.8" cy="7" r=".8" fill="currentColor"/><circle cx="6.5" cy="5.2" r=".8" fill="currentColor"/><circle cx="9.1" cy="5.1" r=".8" fill="currentColor"/></svg>',
       sliders: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.2h6M11.5 4.2H13M3 8h2.5M7 8H13M3 11.8h7M11.5 11.8H13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="10.2" cy="4.2" r="1.1" stroke="currentColor" stroke-width="1.3"/><circle cx="5.8" cy="8" r="1.1" stroke="currentColor" stroke-width="1.3"/><circle cx="10.2" cy="11.8" r="1.1" stroke="currentColor" stroke-width="1.3"/></svg>',
+      pencil: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m10.9 2.2 2.9 2.9-7.6 7.6-3.2.3.3-3.2 7.6-7.6Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="m9.8 3.3 2.9 2.9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+      swap: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 5.2h8.4M9.2 3.6l2.2 1.6-2.2 1.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 10.8H4.6M6.8 9.2l-2.2 1.6 2.2 1.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
       'more-v': '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3.5" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="12.5" r="1.3" fill="currentColor"/></svg>',
     };
     return map[name] || '';
@@ -1734,6 +3077,7 @@ body {
   }
 
   async function runItem(item: Item): Promise<void> {
+    syncActiveCharacterMapping({ silent: true });
     const parsed = resolvePlaceholders(item.content || '');
     if (item.mode === 'inject') {
       const ok = await injectContent(parsed, item.name);
@@ -2084,11 +3428,12 @@ body {
     return groups;
   }
 
-  function showModal(contentFactory: (close: () => void) => HTMLElement): void {
+  function showModal(contentFactory: (close: () => void) => HTMLElement, opts?: { replace?: boolean }): void {
     const overlay = pD.getElementById(OVERLAY_ID);
     if (!overlay) return;
+    const replace = opts?.replace !== false;
     let container = overlay.querySelector('.fp-modal') as HTMLElement | null;
-    if (container) container.remove();
+    if (replace && container) container.remove();
     container = pD.createElement('div');
     container.className = 'fp-modal';
     container.appendChild(contentFactory(() => container!.remove()));
@@ -2108,10 +3453,12 @@ body {
 
   function getOrderedPlaceholderEntries(): Array<{ key: string; value: string }> {
     const placeholders = state.pack?.settings?.placeholders || {};
+    const roleValues = getCurrentRolePlaceholderMap(false);
+    const mergedValues = getEffectivePlaceholderValues(placeholders, roleValues);
     const baseOrder = ['用户', '角色', '苦主', '黄毛'];
     const allKeys = Object.keys(placeholders);
     const ordered = [...baseOrder.filter((k) => allKeys.includes(k)), ...allKeys.filter((k) => !baseOrder.includes(k))];
-    return ordered.map((key) => ({ key, value: String(placeholders[key] || key) }));
+    return ordered.map((key) => ({ key, value: String(mergedValues[key] || key) }));
   }
 
   function buildPlaceholderQuickInsertRow(title = '变量快捷'): string {
@@ -2127,6 +3474,7 @@ body {
   }
 
   function mountPlaceholderQuickInsert(card: HTMLElement, opts: { chipsSelector: string; targetSelector: string }): void {
+    syncActiveCharacterMapping({ silent: true });
     const chipsEl = card.querySelector(opts.chipsSelector) as HTMLElement | null;
     const target = card.querySelector(opts.targetSelector) as HTMLInputElement | HTMLTextAreaElement | null;
     if (!chipsEl || !target) return;
@@ -2274,11 +3622,11 @@ body {
         close();
       }
     };
-    host.onfocusout = (e) => {
+    host.addEventListener('focusout', (e) => {
       const next = e.relatedTarget as Node | null;
       if (next && host.contains(next)) return;
       close();
-    };
+    });
     panel.onclick = (e) => e.stopPropagation();
 
     syncTriggerLabel();
@@ -2369,18 +3717,34 @@ body {
 
   function openSettingsModal(): void {
     if (!state.pack) return;
+    syncActiveCharacterMapping({ silent: true });
     showModal((close) => {
       const card = pD.createElement('div');
       card.className = 'fp-modal-card fp-settings-card';
 
       const placeholders = state.pack!.settings.placeholders || {};
       const rows = ['用户', '角色', '苦主', '黄毛'];
-
       const customKeys = Object.keys(placeholders).filter((k) => !rows.includes(k));
       const ui = state.pack!.settings.ui || {};
       const currentTheme = ui.theme || 'herdi-light';
       const toastSettings = state.pack!.settings.toast || { maxStack: 4, timeout: 1800 };
-
+      const qrLlmSettings = state.pack!.settings.qrLlm || getDefaultQrLlmSettings();
+      const localQrLlmSettings: QrLlmSettings = deepClone(qrLlmSettings);
+      const localQrLlmSecret: QrLlmSecretConfig = deepClone(getQrLlmSecretConfig());
+      const localQrLlmPresetStore: QrLlmPresetStore = normalizeQrLlmPresetStore(
+        deepClone(localQrLlmSettings.presetStore || buildDefaultQrLlmPresetStore()),
+      );
+      const ROLE_DEFAULT_OPTION = '__DEFAULT__';
+      const localRoleValues: Record<string, string> = {};
+      const localCustomPhs: Array<{ originalKey: string; key: string; defaultValue: string }> =
+        customKeys.map((k) => ({ originalKey: k, key: k, defaultValue: placeholders[k] || k }));
+      const localAllRoleMaps: Record<string, Record<string, string>> = deepClone(state.pack!.settings.placeholderRoleMaps.byCharacterId || {});
+      const localAllRoleMeta: Record<string, { name: string; lastSeenAt: string }> = deepClone(state.pack!.settings.placeholderRoleMaps.characterMeta || {});
+      let worldbookOptions: Array<{ value: string; label: string }> = [];
+      let allWorldbookNames: string[] = [];
+      let autoSelectedWorldbookNames: string[] = [];
+      let selectedWorldbookName = '';
+      let selectedRoleOption = state.activeCharacterId || ROLE_DEFAULT_OPTION;
       card.innerHTML = `
         <div class="fp-modal-title">⚙️ 设置中心</div>
         <div class="fp-settings-shell">
@@ -2390,6 +3754,8 @@ body {
               <button class="fp-settings-tab active" data-tab-btn="placeholders">${iconSvg('braces')}占位符</button>
               <button class="fp-settings-tab" data-tab-btn="tokens">${iconSvg('link')}连接符</button>
               <button class="fp-settings-tab" data-tab-btn="default-mode">${iconSvg('wand')}执行方式</button>
+              <button class="fp-settings-tab" data-tab-btn="qr-llm-api">${iconSvg('settings')}API设置</button>
+              <button class="fp-settings-tab" data-tab-btn="qr-llm-presets">${iconSvg('custom')}生成预设</button>
             </div>
             <div class="fp-settings-nav-group">
               <div class="fp-settings-nav-title">外观</div>
@@ -2398,15 +3764,45 @@ body {
             <div class="fp-settings-nav-group">
               <div class="fp-settings-nav-title">系统</div>
               <button class="fp-settings-tab" data-tab-btn="advanced">${iconSvg('sliders')}高级</button>
+              <button class="fp-settings-tab" data-tab-btn="debug">${iconSvg('custom')}调试</button>
             </div>
           </div>
           <div class="fp-settings-body">
             <div class="fp-tab active" data-tab="placeholders">
-              ${rows.map((k) => `<div class="fp-row"><label>${k}</label><input data-ph="${k}" value="${String(placeholders[k] || '')}" /></div>`).join('')}
+              <div class="fp-ph-top">
+                <div class="fp-row fp-ph-top-row">
+                  <label>编辑目标</label>
+                  <div class="fp-ph-top-main">
+                    <div class="fp-ph-top-line">
+                      <select data-ph-role-selector></select>
+                      <span class="fp-ph-auto-spacer">自动选择</span>
+                    </div>
+                    <div data-ph-context class="fp-ph-meta"></div>
+                  </div>
+                </div>
+                <div class="fp-row fp-ph-top-row">
+                  <label>映射来源</label>
+                  <div class="fp-ph-top-main">
+                    <div class="fp-ph-top-line">
+                    <div class="fp-worldbook-select-wrap">
+                      <select data-worldbook-selector></select>
+                      <span class="fp-worldbook-chevron">${iconSvg('chevron-down')}</span>
+                    </div>
+                      <button class="fp-btn" data-worldbook-auto>自动选择</button>
+                    </div>
+                    <div data-worldbook-status class="fp-ph-meta"></div>
+                  </div>
+                </div>
+              </div>
+              <div data-fixed-ph-list></div>
               <div style="border-top:1px solid var(--qr-border-2);margin-top:10px;padding-top:10px">
                 <div style="font-size:12px;font-weight:700;color:var(--qr-row-label);margin-bottom:8px">自定义占位符</div>
                 <div data-custom-ph-list></div>
-                <button class="fp-btn" data-add-ph style="margin-top:6px">+ 添加占位符</button>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+                  <button class="fp-btn" data-add-ph>+ 添加占位符</button>
+                  <button class="fp-btn" data-reset-ph-defaults>全部默认值</button>
+                  <button class="fp-btn" data-refresh-input>刷新输入框内容</button>
+                </div>
               </div>
             </div>
             <div class="fp-tab" data-tab="tokens">
@@ -2439,6 +3835,85 @@ body {
               <div class="fp-row"><label>Toast堆叠上限</label><input data-toast-max type="number" min="1" max="8" value="${Number(toastSettings.maxStack || 4)}" /></div>
               <div class="fp-row"><label>Toast时长(ms)</label><input data-toast-timeout type="number" min="600" max="8000" step="100" value="${Number(toastSettings.timeout || 1800)}" /></div>
             </div>
+            <div class="fp-tab" data-tab="debug">
+              <div style="font-size:12px;color:var(--qr-text-2);margin-bottom:8px">实时显示当前脚本日志（包含发送给AI的实际消息内容）</div>
+              <div class="fp-row" style="justify-content:flex-end;gap:8px">
+                <button class="fp-btn" data-debug-clear>清空日志</button>
+                <button class="fp-btn" data-debug-copy>复制日志</button>
+                <button class="fp-btn" data-debug-export>导出日志</button>
+              </div>
+              <div class="fp-debug-console" data-debug-console></div>
+            </div>
+            <div class="fp-tab" data-tab="qr-llm-api">
+              <div style="font-size:12px;color:var(--qr-text-2);margin-bottom:8px">OpenAI兼容配置（通过酒馆后端代理调用，敏感信息不会随导出导出）</div>
+              <div class="fp-row"><label>API URL</label><input data-qr-api-url value="${localQrLlmSecret.url || ''}" placeholder="如：https://api.openai.com/v1" /></div>
+              <div class="fp-row"><label>API Key</label><input data-qr-api-key type="password" value="${localQrLlmSecret.apiKey || ''}" placeholder="sk-..." /></div>
+              <div class="fp-row"><label>模型列表</label>
+                <div style="display:flex;gap:6px;flex:1">
+                  <button class="fp-btn" data-qr-load-models style="flex:0 0 auto">拉取模型列表</button>
+                  <select data-qr-model-select style="flex:1;min-width:0"></select>
+                </div>
+              </div>
+              <div class="fp-row"><label>模型ID</label><input data-qr-model-manual value="${localQrLlmSecret.manualModelId || localQrLlmSecret.model || ''}" placeholder="可手动填写模型ID" /></div>
+              <div class="fp-row fp-row-block"><label>附加参数</label>
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+                  <textarea data-qr-extra-body-params style="min-height:140px" placeholder="可选，附加到请求体。支持JSON或简易YAML。例如：&#10;reasoning:&#10;  enabled: false&#10;  effort: none&#10;thinking:&#10;  type: disabled"></textarea>
+                  <div style="display:flex;justify-content:flex-end;gap:8px">
+                    <button class="fp-btn" data-qr-fill-disable-thinking>一键禁用思考</button>
+                  </div>
+                  <div style="font-size:12px;color:var(--qr-text-2)">用于传入供应商自定义参数（不参与导出）。</div>
+                </div>
+              </div>
+              <div class="fp-row" style="justify-content:flex-end"><button class="fp-btn" data-qr-test-connect>测试连通性</button></div>
+              <div data-qr-api-status style="font-size:12px;color:var(--qr-text-2);line-height:1.5">状态：待配置</div>
+              <div class="fp-qr-section" style="margin-top:10px">
+                <div class="fp-qr-section-title">生成参数</div>
+                <div class="fp-row"><label>流式输出</label>
+                  <label class="fp-toggle" style="width:auto">
+                    <input type="checkbox" data-qr-stream ${localQrLlmSettings.enabledStream ? 'checked' : ''} />
+                    <span class="fp-toggle-track"><span class="fp-toggle-thumb"></span></span>
+                    <span class="fp-toggle-text">生成时实时写入输入框</span>
+                  </label>
+                </div>
+                <div class="fp-qr-params-grid">
+                  <div class="fp-qr-param-item"><label>temperature</label><input data-qr-temperature type="number" step="0.1" min="0" max="2" value="${Number(localQrLlmSettings.generationParams.temperature ?? 0.9)}" /></div>
+                  <div class="fp-qr-param-item"><label>top_p</label><input data-qr-top-p type="number" step="0.05" min="0" max="1" value="${Number(localQrLlmSettings.generationParams.top_p ?? 1)}" /></div>
+                  <div class="fp-qr-param-item"><label>max_tokens</label><input data-qr-max-tokens type="number" step="1" min="16" max="8192" value="${Number(localQrLlmSettings.generationParams.max_tokens ?? 1024)}" /></div>
+                  <div class="fp-qr-param-item"><label>presence_penalty</label><input data-qr-presence type="number" step="0.1" min="-2" max="2" value="${Number(localQrLlmSettings.generationParams.presence_penalty ?? 0)}" /></div>
+                  <div class="fp-qr-param-item"><label>frequency_penalty</label><input data-qr-frequency type="number" step="0.1" min="-2" max="2" value="${Number(localQrLlmSettings.generationParams.frequency_penalty ?? 0)}" /></div>
+                </div>
+              </div>
+            </div>
+            <div class="fp-tab" data-tab="qr-llm-presets">
+              <div class="fp-qr-note">用于扩写执行内容草稿的 Prompt 预设（可导入/导出共享）</div>
+              <div class="fp-qr-preset-workbench">
+                <div class="fp-qr-section">
+                  <div class="fp-qr-bar">
+                    <select data-qr-preset-select class="fp-select"></select>
+                    <button class="fp-btn" data-qr-preset-new>${iconSvg('add')}新建</button>
+                    <button class="fp-btn" data-qr-preset-delete>删除</button>
+                    <button class="fp-btn" data-qr-preset-reset-default>重置默认</button>
+                  </div>
+                </div>
+
+                <div class="fp-qr-section">
+                    <div class="fp-qr-card-head" style="margin-bottom:10px">
+                      <div class="fp-qr-card-title">结构化段落</div>
+                      <div style="display:flex;gap:6px;flex-wrap:wrap">
+                        <button class="fp-btn" data-qr-seg-add>+ 新条目</button>
+                        <button class="fp-btn" data-qr-seg-transfer>${iconSvg('swap')}转移条目</button>
+                      </div>
+                    </div>
+                  <div data-qr-prompt-group-list class="fp-qr-seg-list"></div>
+                </div>
+
+                <div class="fp-qr-inline-actions">
+                  <button class="fp-btn" data-qr-preset-save>保存/覆盖</button>
+                  <button class="fp-btn" data-qr-preset-export>导出预设</button>
+                  <button class="fp-btn" data-qr-preset-import>导入预设</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="fp-actions">
@@ -2454,6 +3929,999 @@ body {
           const key = btn.getAttribute('data-tab-btn');
           for (const b of tabBtns) b.classList.toggle('active', b === btn);
           for (const t of tabs) t.classList.toggle('active', t.getAttribute('data-tab') === key);
+        };
+      }
+
+      const qrApiStatusEl = card.querySelector('[data-qr-api-status]') as HTMLElement | null;
+      const qrApiUrlEl = card.querySelector('[data-qr-api-url]') as HTMLInputElement | null;
+      const qrApiKeyEl = card.querySelector('[data-qr-api-key]') as HTMLInputElement | null;
+      const qrExtraBodyParamsEl = card.querySelector('[data-qr-extra-body-params]') as HTMLTextAreaElement | null;
+      const qrFillDisableThinkingBtn = card.querySelector('[data-qr-fill-disable-thinking]') as HTMLElement | null;
+      const qrModelSelectEl = card.querySelector('[data-qr-model-select]') as HTMLSelectElement | null;
+      const qrModelManualEl = card.querySelector('[data-qr-model-manual]') as HTMLInputElement | null;
+      const qrLoadModelsBtn = card.querySelector('[data-qr-load-models]') as HTMLElement | null;
+      const qrTestConnectBtn = card.querySelector('[data-qr-test-connect]') as HTMLElement | null;
+      const qrPresetSelectEl = card.querySelector('[data-qr-preset-select]') as HTMLSelectElement | null;
+      const qrPresetNewBtn = card.querySelector('[data-qr-preset-new]') as HTMLElement | null;
+      const qrPresetDeleteBtn = card.querySelector('[data-qr-preset-delete]') as HTMLElement | null;
+      const qrPresetResetDefaultBtn = card.querySelector('[data-qr-preset-reset-default]') as HTMLElement | null;
+      const qrPresetSaveBtn = card.querySelector('[data-qr-preset-save]') as HTMLElement | null;
+      const qrPresetExportBtn = card.querySelector('[data-qr-preset-export]') as HTMLElement | null;
+      const qrPresetImportBtn = card.querySelector('[data-qr-preset-import]') as HTMLElement | null;
+      const qrPromptGroupListEl = card.querySelector('[data-qr-prompt-group-list]') as HTMLElement | null;
+      const qrSegAddBtn = card.querySelector('[data-qr-seg-add]') as HTMLElement | null;
+      const qrSegTransferBtn = card.querySelector('[data-qr-seg-transfer]') as HTMLElement | null;
+      const debugConsoleEl = card.querySelector('[data-debug-console]') as HTMLDivElement | null;
+      const debugClearBtn = card.querySelector('[data-debug-clear]') as HTMLElement | null;
+      const debugCopyBtn = card.querySelector('[data-debug-copy]') as HTMLElement | null;
+      const debugExportBtn = card.querySelector('[data-debug-export]') as HTMLElement | null;
+      if (qrExtraBodyParamsEl) qrExtraBodyParamsEl.value = String(localQrLlmSecret.extraBodyParamsText || '');
+
+      const updateQrApiStatus = (msg: string, level: 'ok' | 'warn' | 'error' | 'info' = 'info') => {
+        if (!qrApiStatusEl) return;
+        const color = level === 'ok' ? '#4caf50' : (level === 'warn' ? '#d89614' : (level === 'error' ? '#d64848' : 'var(--qr-text-2)'));
+        qrApiStatusEl.textContent = `状态：${msg}`;
+        qrApiStatusEl.style.color = color;
+      };
+
+      const renderQrModelSelect = () => {
+        if (!qrModelSelectEl) return;
+        const current = String(localQrLlmSecret.manualModelId || localQrLlmSecret.model || '').trim();
+        const models = [...new Set((state.qrLlmModelList || []).map((x) => String(x || '').trim()).filter(Boolean))];
+        qrModelSelectEl.innerHTML = '<option value="">手动模型ID</option>';
+        models.forEach((model) => {
+          const op = pD.createElement('option');
+          op.value = model;
+          op.textContent = model;
+          qrModelSelectEl.appendChild(op);
+        });
+        if (current && models.includes(current)) qrModelSelectEl.value = current;
+        else qrModelSelectEl.value = '';
+      };
+
+      const normalizeImportedPreset = (raw: unknown, fallbackName = ''): { name: string; preset: QrLlmPreset } | null => {
+        if (!raw || typeof raw !== 'object') return null;
+        const obj = raw as Record<string, unknown>;
+        const name = String(obj.name || fallbackName || '').trim();
+        let systemPrompt = String(obj.systemPrompt || '').trim();
+        let userPromptTemplate = String(obj.userPromptTemplate || '').trim();
+        let promptGroup = normalizePromptGroup(obj.promptGroup);
+        let finalSystemDirective = String(obj.finalSystemDirective || obj.finalDirective || '').trim();
+
+        const expandStVars = (
+          prompts: Array<{
+            identifier?: string;
+            name?: string;
+            enabled?: boolean;
+            role?: string;
+            content?: string;
+            injection_position?: number;
+            injection_depth?: number;
+            injection_order?: number;
+            system_prompt?: boolean;
+            marker?: boolean;
+            forbid_overrides?: boolean;
+          }>,
+        ) => {
+          const enabledPrompts = prompts.filter((p) => p.enabled !== false);
+          const varMap: Record<string, string> = {};
+          const defineRegex = /\{\{(setvar|addvar)::([^:}]+)::([\s\S]*?)\}\}/gi;
+          const readRegex = /\{\{(setvar|getvar)::([^:}]+)(?:::([\s\S]*?))?\}\}/gi;
+          const execRegex = /\{\{(setvar|addvar|getvar)::([^:}]+)(?:::([\s\S]*?))?\}\}/gi;
+
+          const resolveVarReads = (text: string) =>
+            String(text || '')
+              .replace(readRegex, (_all, op, key, body) => {
+                const o = String(op || '').toLowerCase();
+                const k = String(key || '').trim();
+                const b = String(body || '');
+                if (!k) return '';
+                if (o === 'getvar') return String(varMap[k] || '');
+                if (b.trim()) return b;
+                return String(varMap[k] || '');
+              })
+              .replace(/\{\{(setvar|addvar)::([^:}]+)::([\s\S]*?)\}\}/gi, (_all, _op, _key, body) => String(body || ''));
+
+          enabledPrompts.forEach((p) => {
+            const content = String(p.content || '');
+            let m: RegExpExecArray | null = null;
+            while ((m = defineRegex.exec(content)) !== null) {
+              const op = String(m[1] || '').toLowerCase();
+              const key = String(m[2] || '').trim();
+              const rawVal = String(m[3] || '');
+              if (!key) continue;
+              const val = resolveVarReads(rawVal);
+              if (op === 'setvar') {
+                if (rawVal.trim()) varMap[key] = val;
+              } else if (op === 'addvar') {
+                varMap[key] = String(varMap[key] || '') + val;
+              }
+            }
+          });
+
+          for (let i = 0; i < 8; i += 1) {
+            let changed = false;
+            Object.keys(varMap).forEach((key) => {
+              const resolved = resolveVarReads(varMap[key]);
+              if (resolved !== varMap[key]) {
+                varMap[key] = resolved;
+                changed = true;
+              }
+            });
+            if (!changed) break;
+          }
+
+          const renderExpandedContent = (content: string) =>
+            String(content || '')
+              .replace(execRegex, (_all, op, key, body) => {
+                const o = String(op || '').toLowerCase();
+                const k = String(key || '').trim();
+                const b = String(body || '');
+                if (o === 'addvar') return '';
+                if (o === 'setvar') {
+                  if (b.trim()) return '';
+                  return String(varMap[k] || '');
+                }
+                if (o === 'getvar') return String(varMap[k] || '');
+                return '';
+              })
+              .replace(/\{\{(setvar|addvar)::([^:}]+)::([\s\S]*?)\}\}/gi, (_all, _op, _key, body) => String(body || ''))
+              .trim();
+
+          return enabledPrompts.map((p) => {
+            const rawContent = String(p.content || '');
+            const stripped = renderExpandedContent(rawContent);
+            const roleUpper = String(p.role || '').toUpperCase();
+            const role: 'SYSTEM' | 'USER' | 'ASSISTANT' =
+              roleUpper === 'ASSISTANT' ? 'ASSISTANT' : (roleUpper === 'SYSTEM' ? 'SYSTEM' : 'USER');
+            return {
+              id: String(p.identifier || uid('qrp')),
+              role,
+              name: String(p.name || p.identifier || 'Prompt'),
+              note: String(p.name || p.identifier || 'Prompt'),
+              enabled: p.enabled !== false,
+              position: Number(p.injection_position || 0) === 1 ? 'CHAT' as const : 'RELATIVE' as const,
+              injectionDepth: Number(p.injection_depth ?? 4),
+              injectionOrder: Number(p.injection_order ?? 100),
+              marker: Boolean(p.marker),
+              forbidOverrides: Boolean(p.forbid_overrides),
+              content: stripped,
+            };
+          }).filter((x) => String(x.content || '').trim());
+        };
+
+        if (!promptGroup.length && Array.isArray(obj.prompts)) {
+          promptGroup = expandStVars(obj.prompts as Array<{
+            identifier?: string;
+            name?: string;
+            enabled?: boolean;
+            role?: string;
+            content?: string;
+            injection_position?: number;
+            injection_depth?: number;
+            injection_order?: number;
+            system_prompt?: boolean;
+            marker?: boolean;
+            forbid_overrides?: boolean;
+          }>);
+        }
+        if (!userPromptTemplate) {
+          userPromptTemplate = String(obj.finalSystemDirective || obj.userTemplate || obj.userPrompt || '').trim();
+        }
+        if (!finalSystemDirective) {
+          finalSystemDirective = String(obj.finalSystemDirective || obj.finalDirective || '').trim();
+        }
+        if (!systemPrompt) systemPrompt = '你是执行内容扩写助手，负责将草稿扩写为完整可执行内容。';
+        if (!userPromptTemplate) userPromptTemplate = '{{draft}}';
+        if (!name) return null;
+        const compiled = compileQrLlmPreset({
+          systemPrompt,
+          userPromptTemplate,
+          promptGroup,
+          finalSystemDirective,
+          updatedAt: nowIso(),
+        });
+        return {
+          name,
+          preset: compiled,
+        };
+      };
+
+      const listLocalPresetNames = () => Object.keys(localQrLlmPresetStore.presets || {}).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+
+      let localPromptGroupDraft: Array<{
+        id?: string;
+        role: 'SYSTEM' | 'USER' | 'ASSISTANT';
+        position?: 'RELATIVE' | 'CHAT';
+        enabled?: boolean;
+        content: string;
+        note?: string;
+        name?: string;
+        injectionDepth?: number;
+        injectionOrder?: number;
+        marker?: boolean;
+        forbidOverrides?: boolean;
+      }> = [];
+      let draggingSegIndex: number | null = null;
+
+      const compileDraftToFields = () => {
+        compileQrLlmPreset({
+          systemPrompt: '',
+          userPromptTemplate: '',
+          promptGroup: localPromptGroupDraft,
+          finalSystemDirective: '',
+          updatedAt: nowIso(),
+        });
+      };
+
+      const renderPromptGroupEditor = () => {
+        if (!qrPromptGroupListEl) return;
+        qrPromptGroupListEl.innerHTML = '';
+        const esc = (v: string) => String(v || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+        const roleText = (role: 'SYSTEM' | 'USER' | 'ASSISTANT') => role === 'SYSTEM' ? '系统段' : (role === 'USER' ? '用户段' : 'AI助手段');
+        localPromptGroupDraft.forEach((seg, idx) => {
+          const row = pD.createElement('div');
+          row.className = 'fp-qr-seg-row';
+          row.setAttribute('draggable', 'true');
+          row.setAttribute('data-qr-seg-row', String(idx));
+          row.innerHTML = `
+            <div class="fp-qr-seg-main">
+              <div class="fp-qr-seg-note">${esc(seg.name || seg.note || `${roleText(seg.role)} ${idx + 1}`)}</div>
+            </div>
+            <div class="fp-qr-seg-ops">
+              <button class="fp-btn icon-only fp-qr-drag-handle" data-qr-seg-drag-handle="${idx}" title="拖拽排序">${iconSvg('more-v')}</button>
+              <button class="fp-btn icon-only" data-qr-seg-edit="${idx}" title="编辑">${iconSvg('pencil')}</button>
+              <button class="fp-btn icon-only" data-qr-seg-add-after="${idx}" title="新增">${iconSvg('add')}</button>
+              <button class="fp-btn icon-only" data-qr-seg-up="${idx}" title="上移">${iconSvg('chevron-up')}</button>
+              <button class="fp-btn icon-only" data-qr-seg-down="${idx}" title="下移">${iconSvg('chevron-down')}</button>
+              <button class="fp-btn icon-only" data-qr-seg-del="${idx}" title="删除" style="color:#c44">${iconSvg('trash')}</button>
+            </div>
+          `;
+          qrPromptGroupListEl.appendChild(row);
+        });
+        if (!localPromptGroupDraft.length) {
+          qrPromptGroupListEl.innerHTML = '<div class="fp-cat-empty">暂无段落，可新增 SYSTEM/USER 段。</div>';
+        }
+      };
+
+      const openPromptSegmentModal = (idx: number) => {
+        if (idx < 0 || idx >= localPromptGroupDraft.length) return;
+        const seg = localPromptGroupDraft[idx];
+        showModal((closeSeg) => {
+          const segCard = pD.createElement('div');
+          segCard.className = 'fp-modal-card';
+          segCard.style.width = 'min(640px,92vw)';
+          const safeNote = String(seg.name || seg.note || '');
+          const safeRole = seg.role;
+          const safePos = String(seg.position || 'RELATIVE').toUpperCase() === 'CHAT' ? 'chat' : 'relative';
+          const safeEnabled = seg.enabled !== false;
+          segCard.innerHTML = `
+            <div class="fp-modal-title">编辑</div>
+            <div class="fp-seg-edit-grid">
+              <div class="fp-row"><label>姓名</label><input data-seg-note placeholder="例如：Main Prompt / 系统段 / 用户段" /></div>
+              <div class="fp-row"><label>角色</label>
+                <select data-seg-role>
+                  <option value="SYSTEM" ${safeRole === 'SYSTEM' ? 'selected' : ''}>系统</option>
+                  <option value="USER" ${safeRole === 'USER' ? 'selected' : ''}>用户</option>
+                  <option value="ASSISTANT" ${safeRole === 'ASSISTANT' ? 'selected' : ''}>AI助手</option>
+                </select>
+              </div>
+              <div class="fp-row"><label>位置</label>
+                <select data-seg-position>
+                  <option value="relative" ${safePos === 'relative' ? 'selected' : ''}>相对</option>
+                  <option value="chat" ${safePos === 'chat' ? 'selected' : ''}>聊天中</option>
+                </select>
+              </div>
+              <div class="fp-row"><label>启用</label><label class="fp-toggle" style="width:auto"><input type="checkbox" data-seg-enabled ${safeEnabled ? 'checked' : ''}/><span class="fp-toggle-track"><span class="fp-toggle-thumb"></span></span><span class="fp-toggle-text">此条目参与生成</span></label></div>
+            </div>
+            <div class="fp-row" style="align-items:flex-start"><label>提示词</label><textarea data-seg-content placeholder="输入该段的完整提示词"></textarea></div>
+            <div class="fp-actions">
+              <button data-close>取消</button>
+              <button class="primary" data-save>保存</button>
+            </div>
+          `;
+          const initNoteEl = segCard.querySelector('[data-seg-note]') as HTMLInputElement | null;
+          const initContentEl = segCard.querySelector('[data-seg-content]') as HTMLTextAreaElement | null;
+          if (initNoteEl) initNoteEl.value = safeNote;
+          if (initContentEl) {
+            initContentEl.value = String(seg.content || '');
+            initContentEl.style.minHeight = '300px';
+            initContentEl.style.height = '300px';
+          }
+          (segCard.querySelector('[data-close]') as HTMLElement | null)!.onclick = closeSeg;
+          (segCard.querySelector('[data-save]') as HTMLElement | null)!.onclick = () => {
+            const roleEl = segCard.querySelector('[data-seg-role]') as HTMLSelectElement | null;
+            const posEl = segCard.querySelector('[data-seg-position]') as HTMLSelectElement | null;
+            const enabledEl = segCard.querySelector('[data-seg-enabled]') as HTMLInputElement | null;
+            const noteEl = segCard.querySelector('[data-seg-note]') as HTMLInputElement | null;
+            const contentEl = segCard.querySelector('[data-seg-content]') as HTMLTextAreaElement | null;
+            const roleVal = String(roleEl?.value || '').toUpperCase();
+            const posVal = String(posEl?.value || 'relative').toLowerCase();
+            const content = String(contentEl?.value || '');
+            if (!content.trim()) {
+              toast('提示词内容不能为空');
+              return;
+            }
+            localPromptGroupDraft[idx].role = (roleVal === 'USER' || roleVal === 'ASSISTANT') ? roleVal : 'SYSTEM';
+            localPromptGroupDraft[idx].name = String(noteEl?.value || '').trim() || undefined;
+            localPromptGroupDraft[idx].note = localPromptGroupDraft[idx].name;
+            localPromptGroupDraft[idx].position = posVal === 'chat' ? 'CHAT' : 'RELATIVE';
+            localPromptGroupDraft[idx].enabled = Boolean(enabledEl?.checked);
+            localPromptGroupDraft[idx].content = content;
+            renderPromptGroupEditor();
+            compileDraftToFields();
+            closeSeg();
+          };
+          return segCard;
+        }, { replace: false });
+      };
+
+      const openPromptTransferModal = () => {
+        const fromName = String(qrPresetSelectEl?.value || localQrLlmSettings.activePresetName || '').trim();
+        if (!fromName) {
+          toast('请先选择源预设');
+          return;
+        }
+        if (!localPromptGroupDraft.length) {
+          toast('当前预设没有可转移条目');
+          return;
+        }
+        const presetNames = listLocalPresetNames().filter((x) => x !== fromName);
+        if (!presetNames.length) {
+          toast('至少需要另一个预设作为目标');
+          return;
+        }
+        showModal((closeTransfer) => {
+          const tf = pD.createElement('div');
+          tf.className = 'fp-modal-card';
+          tf.style.width = 'min(760px,94vw)';
+          tf.style.maxHeight = '84vh';
+          const esc = (v: string) => String(v || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+          tf.innerHTML = `
+            <div class="fp-modal-title">转移条目</div>
+            <div class="fp-row"><label>源预设</label><input value="${esc(fromName)}" readonly /></div>
+            <div class="fp-row"><label>目标预设</label>
+              <select data-qr-transfer-target>
+                ${presetNames.map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="fp-row"><label>转移方式</label>
+              <select data-qr-transfer-mode>
+                <option value="copy">复制（保留源条目）</option>
+                <option value="move">移动（从源预设移除）</option>
+              </select>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0 6px 0">
+              <div style="font-size:12px;color:var(--qr-text-2)">勾选要转移的条目</div>
+              <div style="display:flex;gap:6px">
+                <button class="fp-btn" data-qr-transfer-all>全选</button>
+                <button class="fp-btn" data-qr-transfer-none>清空</button>
+              </div>
+            </div>
+            <div data-qr-transfer-list style="max-height:360px;overflow:auto;border:1px solid var(--qr-border-2);border-radius:10px;padding:8px"></div>
+            <div class="fp-actions">
+              <button data-close>取消</button>
+              <button class="primary" data-submit>执行转移</button>
+            </div>
+          `;
+          const listEl = tf.querySelector('[data-qr-transfer-list]') as HTMLElement | null;
+          if (listEl) {
+            listEl.innerHTML = localPromptGroupDraft.map((seg, idx) => {
+              const title = String(seg.name || seg.note || `条目${idx + 1}`);
+              const brief = String(seg.content || '').replace(/\s+/g, ' ').slice(0, 72);
+              return `
+                <label style="display:flex;gap:8px;align-items:flex-start;padding:7px 6px;border-radius:8px">
+                  <input type="checkbox" data-qr-transfer-item="${idx}" />
+                  <div style="min-width:0">
+                    <div style="font-size:13px;font-weight:600">${esc(title)}</div>
+                    <div style="font-size:12px;color:var(--qr-text-2)">${esc(brief || '(空内容)')}</div>
+                  </div>
+                </label>
+              `;
+            }).join('');
+          }
+          (tf.querySelector('[data-qr-transfer-all]') as HTMLElement | null)!.onclick = () => {
+            tf.querySelectorAll<HTMLInputElement>('[data-qr-transfer-item]').forEach((el) => { el.checked = true; });
+          };
+          (tf.querySelector('[data-qr-transfer-none]') as HTMLElement | null)!.onclick = () => {
+            tf.querySelectorAll<HTMLInputElement>('[data-qr-transfer-item]').forEach((el) => { el.checked = false; });
+          };
+          (tf.querySelector('[data-close]') as HTMLElement | null)!.onclick = closeTransfer;
+          (tf.querySelector('[data-submit]') as HTMLElement | null)!.onclick = () => {
+            const targetName = String((tf.querySelector('[data-qr-transfer-target]') as HTMLSelectElement | null)?.value || '').trim();
+            const mode = String((tf.querySelector('[data-qr-transfer-mode]') as HTMLSelectElement | null)?.value || 'copy').trim();
+            if (!targetName) {
+              toast('请选择目标预设');
+              return;
+            }
+            if (targetName === fromName) {
+              toast('目标预设不能与源预设相同');
+              return;
+            }
+            const selectedIdx = [...tf.querySelectorAll<HTMLInputElement>('[data-qr-transfer-item]')]
+              .filter((el) => el.checked)
+              .map((el) => Number(el.getAttribute('data-qr-transfer-item')))
+              .filter((n) => Number.isInteger(n) && n >= 0 && n < localPromptGroupDraft.length);
+            if (!selectedIdx.length) {
+              toast('请至少选择一个条目');
+              return;
+            }
+
+            const picked = selectedIdx.map((idx) => ({ ...deepClone(localPromptGroupDraft[idx]), id: uid('qrp') }));
+            const targetCompiled = compileQrLlmPreset(localQrLlmPresetStore.presets[targetName] || {
+              systemPrompt: '你是执行内容扩写助手。',
+              userPromptTemplate: '{{draft}}',
+              updatedAt: nowIso(),
+            });
+            const targetGroup = normalizePromptGroup(targetCompiled.promptGroup);
+            targetGroup.push(...picked);
+            localQrLlmPresetStore.presets[targetName] = compileQrLlmPreset({
+              systemPrompt: '',
+              userPromptTemplate: '',
+              promptGroup: targetGroup,
+              finalSystemDirective: '',
+              updatedAt: nowIso(),
+            });
+
+            if (mode === 'move') {
+              const sorted = [...selectedIdx].sort((a, b) => b - a);
+              sorted.forEach((idx) => {
+                localPromptGroupDraft.splice(idx, 1);
+              });
+              renderPromptGroupEditor();
+              compileDraftToFields();
+            }
+            toast(`已${mode === 'move' ? '移动' : '复制'} ${selectedIdx.length} 条到「${targetName}」`);
+            closeTransfer();
+          };
+          return tf;
+        }, { replace: false });
+      };
+
+      const getSegIndex = (target: EventTarget | null, key: string): number => {
+        const el = target as HTMLElement | null;
+        if (!el) return -1;
+        const raw = el.getAttribute(key);
+        if (raw === null || raw === undefined || String(raw).trim() === '') return -1;
+        const idx = Number(raw);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= localPromptGroupDraft.length) return -1;
+        return idx;
+      };
+
+      const loadSelectedPresetToForm = (name: string) => {
+        const preset = localQrLlmPresetStore.presets[name];
+        if (!preset) return;
+        const normalizedPreset = compileQrLlmPreset(preset);
+        localPromptGroupDraft = normalizePromptGroup(normalizedPreset.promptGroup);
+        if (String(normalizedPreset.finalSystemDirective || '').trim() && !localPromptGroupDraft.some((x) => String(x.name || '').includes('Final'))) {
+          localPromptGroupDraft.push({
+            id: uid('qrp'),
+            role: 'SYSTEM',
+            name: 'Final指令',
+            note: 'Final指令',
+            position: 'RELATIVE',
+            enabled: true,
+            injectionDepth: 4,
+            injectionOrder: 100,
+            content: String(normalizedPreset.finalSystemDirective || ''),
+          });
+        }
+        if (!localPromptGroupDraft.length) {
+          const defPreset = buildDefaultQrLlmPresetStore().presets[DEFAULT_QR_LLM_PRESET_NAME];
+          localPromptGroupDraft = normalizePromptGroup(defPreset.promptGroup);
+          if (!localPromptGroupDraft.length) {
+            localPromptGroupDraft = [
+              { id: uid('qrp'), role: 'SYSTEM', name: '系统段', note: '系统段', position: 'RELATIVE', enabled: true, injectionDepth: 4, injectionOrder: 100, content: normalizedPreset.systemPrompt || '' },
+              { id: uid('qrp'), role: 'USER', name: 'Main Prompt', note: 'Main Prompt', position: 'RELATIVE', enabled: true, injectionDepth: 4, injectionOrder: 100, content: normalizedPreset.userPromptTemplate || '' },
+            ];
+          }
+        }
+        renderPromptGroupEditor();
+      };
+
+      const renderQrPresetSelect = (prefer?: string) => {
+        if (!qrPresetSelectEl) return;
+        const names = listLocalPresetNames();
+        qrPresetSelectEl.innerHTML = '';
+        names.forEach((name) => {
+          const op = pD.createElement('option');
+          op.value = name;
+          op.textContent = name;
+          qrPresetSelectEl.appendChild(op);
+        });
+        const target = String(prefer || localQrLlmSettings.activePresetName || names[0] || DEFAULT_QR_LLM_PRESET_NAME);
+        if (target && names.includes(target)) qrPresetSelectEl.value = target;
+        else if (names.length) qrPresetSelectEl.value = names[0];
+        localQrLlmSettings.activePresetName = String(qrPresetSelectEl.value || target);
+        if (localQrLlmSettings.activePresetName) loadSelectedPresetToForm(localQrLlmSettings.activePresetName);
+      };
+
+      localQrLlmSettings.presetStore = normalizeQrLlmPresetStore(localQrLlmPresetStore);
+      if (!localQrLlmSettings.activePresetName || !localQrLlmSettings.presetStore.presets[localQrLlmSettings.activePresetName]) {
+        localQrLlmSettings.activePresetName = DEFAULT_QR_LLM_PRESET_NAME;
+      }
+      if (localQrLlmSecret.model && !localQrLlmSecret.manualModelId) localQrLlmSecret.manualModelId = localQrLlmSecret.model;
+      if (localQrLlmSecret.manualModelId && !localQrLlmSecret.model) localQrLlmSecret.model = localQrLlmSecret.manualModelId;
+      if (localQrLlmSecret.model && !state.qrLlmModelList.includes(localQrLlmSecret.model)) {
+        state.qrLlmModelList = [...state.qrLlmModelList, localQrLlmSecret.model];
+      }
+      renderQrModelSelect();
+      if (qrModelManualEl) qrModelManualEl.value = localQrLlmSecret.manualModelId || localQrLlmSecret.model || '';
+      renderQrPresetSelect(localQrLlmSettings.activePresetName);
+      updateQrApiStatus(localQrLlmSecret.url ? `已设置URL${localQrLlmSecret.model ? `，当前模型：${localQrLlmSecret.model}` : '，未选模型'}` : '待配置');
+      const renderDebugConsole = () => {
+        if (!debugConsoleEl) return;
+        const text = state.debugLogs.length ? getDebugLogText() : '[暂无日志]';
+        debugConsoleEl.textContent = text;
+        debugConsoleEl.scrollTop = debugConsoleEl.scrollHeight;
+      };
+      renderDebugConsole();
+      if (debugClearBtn) {
+        debugClearBtn.onclick = () => {
+          state.debugLogs = [];
+          renderDebugConsole();
+          toast('调试日志已清空');
+        };
+      }
+      if (debugCopyBtn) {
+        debugCopyBtn.onclick = async () => {
+          const text = getDebugLogText();
+          if (!text.trim()) {
+            toast('暂无可复制日志');
+            return;
+          }
+          try {
+            await pW.navigator.clipboard.writeText(text);
+            toast('调试日志已复制');
+          } catch (e) {
+            toast('复制失败，请手动选择复制');
+          }
+        };
+      }
+      if (debugExportBtn) {
+        debugExportBtn.onclick = () => {
+          const text = getDebugLogText();
+          if (!text.trim()) {
+            toast('暂无可导出日志');
+            return;
+          }
+          const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+          const a = pD.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = `快速回复管理器日志_${Date.now()}.log`;
+          a.click();
+          URL.revokeObjectURL(a.href);
+          toast('日志已导出');
+        };
+      }
+      const debugTimer = pW.setInterval(() => {
+        if (!card.isConnected) {
+          pW.clearInterval(debugTimer);
+          return;
+        }
+        renderDebugConsole();
+      }, 500);
+
+      if (qrApiUrlEl) qrApiUrlEl.oninput = () => {
+        localQrLlmSecret.url = String(qrApiUrlEl.value || '').trim();
+      };
+      if (qrApiKeyEl) qrApiKeyEl.oninput = () => {
+        localQrLlmSecret.apiKey = String(qrApiKeyEl.value || '');
+      };
+      if (qrExtraBodyParamsEl) qrExtraBodyParamsEl.oninput = () => {
+        localQrLlmSecret.extraBodyParamsText = String(qrExtraBodyParamsEl.value || '');
+      };
+      if (qrFillDisableThinkingBtn && qrExtraBodyParamsEl) {
+        qrFillDisableThinkingBtn.onclick = () => {
+          const presetText = `reasoning:
+  enabled: false
+  exclude: true
+  effort: none
+
+thinking:
+  type: disabled
+
+enable_thinking: false
+disable_thinking: true
+use_thinking: false
+thinking_enabled: false
+enable_reasoning: false
+disable_reasoning: true
+reasoning_enabled: false
+reasoning_effort: none
+seed: -1`;
+          qrExtraBodyParamsEl.value = presetText;
+          localQrLlmSecret.extraBodyParamsText = presetText;
+          updateQrApiStatus('已填入禁思考附加参数', 'ok');
+          toast('已填入「一键禁用思考」参数');
+        };
+      }
+      if (qrModelSelectEl) qrModelSelectEl.onchange = () => {
+        const val = String(qrModelSelectEl.value || '').trim();
+        if (val) {
+          localQrLlmSecret.model = val;
+          localQrLlmSecret.manualModelId = val;
+          if (qrModelManualEl) qrModelManualEl.value = val;
+        }
+        updateQrApiStatus(val ? `模型已选择：${val}` : '请选择或手动填写模型', val ? 'ok' : 'warn');
+      };
+      if (qrModelManualEl) qrModelManualEl.oninput = () => {
+        const val = String(qrModelManualEl.value || '').trim();
+        localQrLlmSecret.manualModelId = val;
+        localQrLlmSecret.model = val;
+        if (qrModelSelectEl) {
+          const has = [...qrModelSelectEl.options].some((x) => x.value === val);
+          qrModelSelectEl.value = has ? val : '';
+        }
+      };
+      if (qrLoadModelsBtn) {
+        qrLoadModelsBtn.onclick = async () => {
+          const url = String(qrApiUrlEl?.value || localQrLlmSecret.url || '').trim();
+          const apiKey = String(qrApiKeyEl?.value || localQrLlmSecret.apiKey || '');
+          const extraBodyParamsText = String(qrExtraBodyParamsEl?.value || localQrLlmSecret.extraBodyParamsText || '');
+          localQrLlmSecret.url = url;
+          localQrLlmSecret.apiKey = apiKey;
+          localQrLlmSecret.extraBodyParamsText = extraBodyParamsText;
+          if (!url) {
+            toast('请先填写API URL');
+            updateQrApiStatus('请先填写API URL', 'warn');
+            return;
+          }
+          updateQrApiStatus('正在拉取模型列表...');
+          try {
+            const models = await fetchQrLlmModels(localQrLlmSecret);
+            state.qrLlmModelList = models;
+            renderQrModelSelect();
+            if (models.length) {
+              toast(`模型列表加载成功（${models.length}个）`);
+              updateQrApiStatus(`模型列表加载成功（${models.length}个）`, 'ok');
+            } else {
+              toast('模型列表为空');
+              updateQrApiStatus('模型列表为空', 'warn');
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            toast(`模型列表加载失败: ${msg}`);
+            updateQrApiStatus(`模型列表加载失败: ${msg}`, 'error');
+          }
+        };
+      }
+      if (qrTestConnectBtn) {
+        qrTestConnectBtn.onclick = async () => {
+          const url = String(qrApiUrlEl?.value || localQrLlmSecret.url || '').trim();
+          const apiKey = String(qrApiKeyEl?.value || localQrLlmSecret.apiKey || '');
+          const extraBodyParamsText = String(qrExtraBodyParamsEl?.value || localQrLlmSecret.extraBodyParamsText || '');
+          const model = String(qrModelManualEl?.value || localQrLlmSecret.manualModelId || localQrLlmSecret.model || '').trim();
+          localQrLlmSecret.url = url;
+          localQrLlmSecret.apiKey = apiKey;
+          localQrLlmSecret.extraBodyParamsText = extraBodyParamsText;
+          localQrLlmSecret.manualModelId = model;
+          localQrLlmSecret.model = model;
+          updateQrApiStatus('正在测试连通性...');
+          try {
+            await testQrLlmConnection(localQrLlmSecret, model);
+            toast('连通性测试成功');
+            updateQrApiStatus('连通成功', 'ok');
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            toast(`连通性测试失败: ${msg}`);
+            updateQrApiStatus(`连通性测试失败: ${msg}`, 'error');
+          }
+        };
+      }
+
+      if (qrPresetSelectEl) {
+        qrPresetSelectEl.onchange = () => {
+          const name = String(qrPresetSelectEl.value || '').trim();
+          if (!name) return;
+          localQrLlmSettings.activePresetName = name;
+          loadSelectedPresetToForm(name);
+        };
+      }
+      if (qrPromptGroupListEl) {
+        qrPromptGroupListEl.ondragstart = (ev) => {
+          const target = ev.target as HTMLElement | null;
+          const handle = target?.closest('[data-qr-seg-drag-handle]') as HTMLElement | null;
+          if (!handle) {
+            ev.preventDefault();
+            return;
+          }
+          const row = target?.closest('[data-qr-seg-row]') as HTMLElement | null;
+          if (!row) return;
+          const idx = Number(row.getAttribute('data-qr-seg-row'));
+          if (!Number.isInteger(idx) || idx < 0 || idx >= localPromptGroupDraft.length) return;
+          draggingSegIndex = idx;
+          row.style.opacity = '0.55';
+          if (ev.dataTransfer) {
+            ev.dataTransfer.effectAllowed = 'move';
+            ev.dataTransfer.setData('text/plain', String(idx));
+          }
+        };
+        qrPromptGroupListEl.ondragover = (ev) => {
+          if (draggingSegIndex === null) return;
+          ev.preventDefault();
+          if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+        };
+        qrPromptGroupListEl.ondrop = (ev) => {
+          if (draggingSegIndex === null) return;
+          ev.preventDefault();
+          const target = ev.target as HTMLElement | null;
+          const row = target?.closest('[data-qr-seg-row]') as HTMLElement | null;
+          if (!row) return;
+          const rawTo = Number(row.getAttribute('data-qr-seg-row'));
+          if (!Number.isInteger(rawTo) || rawTo < 0 || rawTo >= localPromptGroupDraft.length) return;
+          const from = draggingSegIndex;
+          let to = rawTo;
+          const rect = row.getBoundingClientRect();
+          if (ev.clientY > rect.top + rect.height / 2) to = rawTo + 1;
+          if (from < to) to -= 1;
+          if (to < 0) to = 0;
+          if (to >= localPromptGroupDraft.length) to = localPromptGroupDraft.length - 1;
+          if (from === to) return;
+          const moved = localPromptGroupDraft.splice(from, 1)[0];
+          localPromptGroupDraft.splice(to, 0, moved);
+          renderPromptGroupEditor();
+          compileDraftToFields();
+        };
+        qrPromptGroupListEl.ondragend = () => {
+          draggingSegIndex = null;
+          qrPromptGroupListEl.querySelectorAll<HTMLElement>('[data-qr-seg-row]').forEach((el) => {
+            el.style.opacity = '';
+          });
+        };
+        qrPromptGroupListEl.onclick = (ev) => {
+          const target = ev.target as HTMLElement | null;
+          const btn = target?.closest('button');
+          if (!btn) return;
+          const editIdx = getSegIndex(btn, 'data-qr-seg-edit');
+          if (editIdx >= 0) {
+            openPromptSegmentModal(editIdx);
+            return;
+          }
+          const addIdx = getSegIndex(btn, 'data-qr-seg-add-after');
+          if (addIdx >= 0) {
+            const role = localPromptGroupDraft[addIdx]?.role || 'USER';
+            localPromptGroupDraft.splice(addIdx + 1, 0, {
+              id: uid('qrp'),
+              role,
+              name: role === 'SYSTEM' ? '系统段' : '新条目',
+              note: role === 'SYSTEM' ? '系统段' : '新条目',
+              position: 'RELATIVE',
+              enabled: true,
+              injectionDepth: 4,
+              injectionOrder: 100,
+              content: '',
+            });
+            renderPromptGroupEditor();
+            openPromptSegmentModal(addIdx + 1);
+            return;
+          }
+          const upIdx = getSegIndex(btn, 'data-qr-seg-up');
+          if (upIdx >= 0) {
+            if (upIdx > 0) {
+              const tmp = localPromptGroupDraft[upIdx - 1];
+              localPromptGroupDraft[upIdx - 1] = localPromptGroupDraft[upIdx];
+              localPromptGroupDraft[upIdx] = tmp;
+              renderPromptGroupEditor();
+              compileDraftToFields();
+            }
+            return;
+          }
+          const downIdx = getSegIndex(btn, 'data-qr-seg-down');
+          if (downIdx >= 0) {
+            if (downIdx < localPromptGroupDraft.length - 1) {
+              const tmp = localPromptGroupDraft[downIdx + 1];
+              localPromptGroupDraft[downIdx + 1] = localPromptGroupDraft[downIdx];
+              localPromptGroupDraft[downIdx] = tmp;
+              renderPromptGroupEditor();
+              compileDraftToFields();
+            }
+            return;
+          }
+          const delIdx = getSegIndex(btn, 'data-qr-seg-del');
+          if (delIdx >= 0) {
+            if (localPromptGroupDraft.length <= 1) {
+              toast('至少保留一个段落');
+              return;
+            }
+            localPromptGroupDraft.splice(delIdx, 1);
+            renderPromptGroupEditor();
+            compileDraftToFields();
+          }
+        };
+      }
+      if (qrSegAddBtn) {
+        qrSegAddBtn.onclick = () => {
+          localPromptGroupDraft.push({
+            id: uid('qrp'),
+            role: 'USER',
+            name: '新条目',
+            note: '新条目',
+            position: 'RELATIVE',
+            enabled: true,
+            injectionDepth: 4,
+            injectionOrder: 100,
+            content: '',
+          });
+          renderPromptGroupEditor();
+          openPromptSegmentModal(localPromptGroupDraft.length - 1);
+        };
+      }
+      if (qrSegTransferBtn) {
+        qrSegTransferBtn.onclick = () => {
+          openPromptTransferModal();
+        };
+      }
+      if (qrPresetNewBtn) {
+        qrPresetNewBtn.onclick = () => {
+          const draftName = prompt('输入新预设名称', '新预设');
+          const name = String(draftName || '').trim();
+          if (!name) return;
+          if (!localQrLlmPresetStore.presets[name]) {
+            const base = compileQrLlmPreset(localQrLlmPresetStore.presets[DEFAULT_QR_LLM_PRESET_NAME] || {
+              systemPrompt: '你是执行内容扩写助手。',
+              userPromptTemplate: '{{draft}}',
+              updatedAt: nowIso(),
+            });
+            localQrLlmPresetStore.presets[name] = deepClone(base);
+            localQrLlmPresetStore.presets[name].updatedAt = nowIso();
+          }
+          localQrLlmSettings.activePresetName = name;
+          renderQrPresetSelect(name);
+          toast(`已创建预设：${name}`);
+        };
+      }
+      if (qrPresetDeleteBtn) {
+        qrPresetDeleteBtn.onclick = () => {
+          const selected = String(qrPresetSelectEl?.value || localQrLlmSettings.activePresetName || '').trim();
+          if (!selected) {
+            toast('未选择预设');
+            return;
+          }
+          if (selected === DEFAULT_QR_LLM_PRESET_NAME) {
+            toast('默认预设不可删除');
+            return;
+          }
+          if (!confirm(`确认删除预设「${selected}」？`)) return;
+          delete localQrLlmPresetStore.presets[selected];
+          localQrLlmSettings.activePresetName = DEFAULT_QR_LLM_PRESET_NAME;
+          renderQrPresetSelect(DEFAULT_QR_LLM_PRESET_NAME);
+          toast('预设已删除');
+        };
+      }
+      if (qrPresetResetDefaultBtn) {
+        qrPresetResetDefaultBtn.onclick = () => {
+          const selected = String(qrPresetSelectEl?.value || localQrLlmSettings.activePresetName || '').trim();
+          if (selected && selected !== DEFAULT_QR_LLM_PRESET_NAME) {
+            toast('请先切换到“默认预设”再重置');
+            return;
+          }
+          if (!confirm('确认重置“默认预设”？此操作会覆盖当前默认预设内容。')) return;
+          const def = buildDefaultQrLlmPresetStore().presets[DEFAULT_QR_LLM_PRESET_NAME];
+          localQrLlmPresetStore.presets[DEFAULT_QR_LLM_PRESET_NAME] = deepClone(def);
+          localQrLlmSettings.activePresetName = DEFAULT_QR_LLM_PRESET_NAME;
+          renderQrPresetSelect(DEFAULT_QR_LLM_PRESET_NAME);
+          loadSelectedPresetToForm(DEFAULT_QR_LLM_PRESET_NAME);
+          toast('默认预设已重置');
+        };
+      }
+
+      if (qrPresetSaveBtn) {
+        qrPresetSaveBtn.onclick = () => {
+          const name = String(qrPresetSelectEl?.value || localQrLlmSettings.activePresetName || '').trim();
+          if (!name) {
+            toast('请先选择预设');
+            return;
+          }
+          if (!localPromptGroupDraft.length) {
+            toast('至少需要一个结构化段落');
+            return;
+          }
+          const compiled = compileQrLlmPreset({
+            systemPrompt: '',
+            userPromptTemplate: '',
+            promptGroup: localPromptGroupDraft,
+            finalSystemDirective: '',
+            updatedAt: nowIso(),
+          });
+          localQrLlmPresetStore.presets[name] = compiled;
+          localPromptGroupDraft = normalizePromptGroup(compiled.promptGroup);
+          localQrLlmSettings.activePresetName = name;
+          renderQrPresetSelect(name);
+          toast(`预设已保存：${name}`);
+        };
+      }
+      if (qrPresetExportBtn) {
+        qrPresetExportBtn.onclick = () => {
+          const selected = String(qrPresetSelectEl?.value || localQrLlmSettings.activePresetName || '').trim();
+          const selectedPreset = selected ? localQrLlmPresetStore.presets[selected] : null;
+          const stPrompts = selectedPreset
+            ? normalizePromptGroup(selectedPreset.promptGroup).map((seg) => ({
+                identifier: String(seg.id || uid('qrp')),
+                name: String(seg.name || seg.note || 'Prompt'),
+                enabled: seg.enabled !== false,
+                injection_position: String(seg.position || 'RELATIVE') === 'CHAT' ? 1 : 0,
+                injection_depth: Number(seg.injectionDepth ?? 4),
+                injection_order: Number(seg.injectionOrder ?? 100),
+                role: String(seg.role || 'SYSTEM').toLowerCase(),
+                content: String(seg.content || ''),
+                system_prompt: false,
+                marker: Boolean(seg.marker),
+                forbid_overrides: Boolean(seg.forbidOverrides),
+              }))
+            : [];
+          const payload = selected
+            ? {
+                version: 1,
+                presets: { [selected]: localQrLlmPresetStore.presets[selected] },
+                sillytavern_prompt_preset: {
+                  name: selected,
+                  prompts: stPrompts,
+                },
+              }
+            : localQrLlmPresetStore;
+          const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+          const a = pD.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = `QR生成预设_${selected || '全部'}_${Date.now()}.json`;
+          a.click();
+          URL.revokeObjectURL(a.href);
+          toast('预设已导出');
+        };
+      }
+      if (qrPresetImportBtn) {
+        qrPresetImportBtn.onclick = () => {
+          const input = pD.createElement('input');
+          input.type = 'file';
+          input.accept = '.json,application/json';
+          input.onchange = async () => {
+            const file = input.files?.[0];
+            if (!file) return;
+            try {
+              const text = await file.text();
+              const parsed = JSON.parse(text);
+              const imported: Array<{ name: string; preset: QrLlmPreset }> = [];
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Number((parsed as Record<string, unknown>).version) === 1 && typeof (parsed as Record<string, unknown>).presets === 'object') {
+                const presetsMap = ((parsed as Record<string, unknown>).presets || {}) as Record<string, unknown>;
+                Object.entries(presetsMap).forEach(([name, raw]) => {
+                  const hit = normalizeImportedPreset({ ...(raw as Record<string, unknown>), name }, name);
+                  if (hit) imported.push(hit);
+                });
+              } else if (Array.isArray(parsed)) {
+                parsed.forEach((raw, idx) => {
+                  const hit = normalizeImportedPreset(raw, `导入预设_${idx + 1}`);
+                  if (hit) imported.push(hit);
+                });
+              } else {
+                const hit = normalizeImportedPreset(parsed, `导入预设_${Date.now()}`);
+                if (hit) imported.push(hit);
+              }
+              if (!imported.length) {
+                toast('未识别到有效预设');
+                return;
+              }
+              imported.forEach(({ name, preset }) => {
+                localQrLlmPresetStore.presets[name] = preset;
+              });
+              localQrLlmSettings.activePresetName = imported[0].name;
+              renderQrPresetSelect(imported[0].name);
+              loadSelectedPresetToForm(imported[0].name);
+              toast(`已导入 ${imported.length} 个预设`);
+            } catch (err) {
+              toast('导入失败：JSON格式错误或结构不支持');
+            }
+          };
+          input.click();
         };
       }
 
@@ -2498,31 +4966,480 @@ body {
         renderConnectorsList();
       };
 
-      // 自定义占位符列表管理
-      const localCustomPhs: Array<{key: string; value: string}> = customKeys.map(k => ({ key: k, value: placeholders[k] || '' }));
+      const contextEl = card.querySelector('[data-ph-context]') as HTMLElement | null;
+      const roleSelectorEl = card.querySelector('[data-ph-role-selector]') as HTMLSelectElement | null;
+      const fixedListEl = card.querySelector('[data-fixed-ph-list]') as HTMLElement | null;
+      const customListEl = card.querySelector('[data-custom-ph-list]') as HTMLElement | null;
+      const worldbookStatusEl = card.querySelector('[data-worldbook-status]') as HTMLElement | null;
+      const worldbookSelectorEl = card.querySelector('[data-worldbook-selector]') as HTMLSelectElement | null;
+      const worldbookSelectorWrapEl = card.querySelector('.fp-worldbook-select-wrap') as HTMLElement | null;
+      const worldbookAutoBtn = card.querySelector('[data-worldbook-auto]') as HTMLElement | null;
+      const localFixedDefaults: Record<string, string> = {};
+      for (const k of rows) localFixedDefaults[k] = String(placeholders[k] || k);
+
+      const getRoleSelectorOptions = (): Array<{ id: string; name: string }> => {
+        const existing = getExistingCharacterCardsSafe();
+        return existing.map((card) => ({
+          id: card.id,
+          name: String(localAllRoleMeta[card.id]?.name || card.name || card.id),
+        }));
+      };
+
+      const renderRoleSelector = () => {
+        if (!roleSelectorEl) return;
+        const options = getRoleSelectorOptions();
+        const validIds = new Set<string>(options.map((x) => x.id));
+        if (selectedRoleOption !== ROLE_DEFAULT_OPTION && selectedRoleOption && !validIds.has(selectedRoleOption)) {
+          selectedRoleOption = ROLE_DEFAULT_OPTION;
+          loadRoleValuesBySelection();
+        }
+        roleSelectorEl.innerHTML = [
+          `<option value="${ROLE_DEFAULT_OPTION}" ${selectedRoleOption === ROLE_DEFAULT_OPTION ? 'selected' : ''}>默认</option>`,
+          ...options.map(({ id, name }) => {
+            return `<option value="${id}" ${selectedRoleOption === id ? 'selected' : ''}>${name}（${id}）</option>`;
+          }),
+        ].join('');
+      };
+
+      const loadRoleValuesBySelection = () => {
+        for (const k of Object.keys(localRoleValues)) delete localRoleValues[k];
+        if (selectedRoleOption === ROLE_DEFAULT_OPTION) return;
+        const src = localAllRoleMaps[selectedRoleOption] || {};
+        for (const [k, v] of Object.entries(src)) localRoleValues[k] = String(v || '');
+      };
+
+      const saveRoleValuesBySelection = () => {
+        if (selectedRoleOption === ROLE_DEFAULT_OPTION) return;
+        const next: Record<string, string> = {};
+        for (const [k, v] of Object.entries(localRoleValues)) {
+          const key = String(k || '').trim();
+          const val = String(v || '').trim();
+          if (!key || !val) continue;
+          next[key] = val;
+        }
+        if (Object.keys(next).length) localAllRoleMaps[selectedRoleOption] = next;
+        else delete localAllRoleMaps[selectedRoleOption];
+      };
+
+      const refreshContextLabel = () => {
+        if (!contextEl) return;
+        if (selectedRoleOption === ROLE_DEFAULT_OPTION) {
+          contextEl.textContent = '编辑目标：默认占位符值';
+          return;
+        }
+        const displayName = String(localAllRoleMeta[selectedRoleOption]?.name || (selectedRoleOption === state.activeCharacterId ? state.activeCharacterName : '') || selectedRoleOption);
+        contextEl.textContent = `编辑目标：${displayName}（${selectedRoleOption}）`;
+      };
+
+      if (selectedRoleOption !== ROLE_DEFAULT_OPTION) {
+        if (!localAllRoleMeta[selectedRoleOption]) {
+          localAllRoleMeta[selectedRoleOption] = {
+            name: selectedRoleOption === state.activeCharacterId ? (state.activeCharacterName || selectedRoleOption) : selectedRoleOption,
+            lastSeenAt: nowIso(),
+          };
+        }
+      }
+      loadRoleValuesBySelection();
+      renderRoleSelector();
+      refreshContextLabel();
+
+      const getValidSelectedValues = (selectedValue: string): string[] => {
+        const selectedValues = splitMultiValue(selectedValue);
+        const validValues = new Set<string>(worldbookOptions.map((x) => x.value));
+        return selectedValues.filter((v) => validValues.has(v));
+      };
+
+      const mountValueMultiPicker = (host: HTMLElement, defaultValue: string, selectedValue: string, onChange: (value: string) => void) => {
+        const picker = pD.createElement('div');
+        picker.className = 'fp-multi-picker';
+        const trigger = pD.createElement('button');
+        trigger.type = 'button';
+        trigger.className = 'fp-multi-trigger';
+        trigger.innerHTML = `<span class="fp-multi-text"></span>${iconSvg('chevron-down')}`;
+        const panel = pD.createElement('div');
+        panel.className = 'fp-multi-panel';
+        const list = pD.createElement('div');
+        list.className = 'fp-multi-panel-list';
+        panel.appendChild(list);
+        picker.appendChild(trigger);
+        picker.appendChild(panel);
+        host.appendChild(picker);
+
+        let selected = getValidSelectedValues(selectedValue);
+        if (!selected.length || (selected.length === 1 && selected[0] === defaultValue)) selected = [];
+        const summarize = () => {
+          if (!selected.length) return `默认值（${defaultValue || '空'}）`;
+          if (selected.length === 1) return selected[0];
+          if (selected.length === 2) return `${selected[0]}、${selected[1]}`;
+          return `${selected[0]} 等${selected.length}项`;
+        };
+        const setTriggerText = () => {
+          const text = summarize();
+          const textEl = trigger.querySelector('.fp-multi-text') as HTMLElement | null;
+          if (textEl) textEl.textContent = text;
+          trigger.title = text;
+        };
+        const emit = () => onChange(selected.length ? joinMultiValue(selected) : '');
+        const renderOptions = () => {
+          list.innerHTML = '';
+          const defaultBtn = pD.createElement('button');
+          defaultBtn.type = 'button';
+          defaultBtn.className = `fp-multi-opt ${selected.length ? '' : 'active'}`;
+          defaultBtn.innerHTML = `<input type="checkbox" ${selected.length ? '' : 'checked'} /><span>默认值（${defaultValue || '空'}）</span>`;
+          defaultBtn.onclick = () => {
+            selected = [];
+            setTriggerText();
+            emit();
+            renderOptions();
+          };
+          list.appendChild(defaultBtn);
+          worldbookOptions.forEach((opt) => {
+            const active = selected.includes(opt.value);
+            const btn = pD.createElement('button');
+            btn.type = 'button';
+            btn.className = `fp-multi-opt ${active ? 'active' : ''}`;
+            btn.innerHTML = `<input type="checkbox" ${active ? 'checked' : ''} /><span>${opt.label}</span>`;
+            btn.onclick = () => {
+              if (selected.includes(opt.value)) selected = selected.filter((v) => v !== opt.value);
+              else selected.push(opt.value);
+              selected = [...new Set(selected)];
+              setTriggerText();
+              emit();
+              renderOptions();
+            };
+            list.appendChild(btn);
+          });
+        };
+        setTriggerText();
+        emit();
+        renderOptions();
+        trigger.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          picker.classList.toggle('open');
+        };
+        picker.addEventListener('focusout', (e) => {
+          const next = e.relatedTarget as Node | null;
+          if (next && picker.contains(next)) return;
+          picker.classList.remove('open');
+        });
+      };
+
+      const renderWorldbookSourceSelector = () => {
+        if (!worldbookSelectorEl) return;
+        worldbookSelectorEl.innerHTML = [`<option value="" ${!selectedWorldbookName ? 'selected' : ''}>无</option>`, ...allWorldbookNames
+          .map((name) => `<option value="${name}" ${selectedWorldbookName === name ? 'selected' : ''}>${name}</option>`)
+        ].join('');
+      };
+
+      const renderFixedPhList = () => {
+        if (!fixedListEl) return;
+        fixedListEl.innerHTML = '';
+        rows.forEach((k) => {
+          const row = pD.createElement('div');
+          row.className = 'fp-row';
+          row.style.alignItems = 'center';
+          const currentValue = String(localRoleValues[k] || '');
+          const defaultValue = String(localFixedDefaults[k] || k);
+          row.innerHTML = `
+            <label>${k}</label>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;flex:1">
+              <div data-ph-picker="${k}"></div>
+              <input type="hidden" data-ph-picked="${k}" />
+              <button type="button" class="fp-btn icon-only" data-ph-edit-default="${k}" title="编辑默认值">${iconSvg('pencil')}</button>
+            </div>
+          `;
+          fixedListEl.appendChild(row);
+          const pickerHost = row.querySelector(`[data-ph-picker="${k}"]`) as HTMLElement | null;
+          const hidden = row.querySelector(`[data-ph-picked="${k}"]`) as HTMLInputElement | null;
+          if (pickerHost && hidden) {
+            mountValueMultiPicker(pickerHost, defaultValue, currentValue, (val) => {
+              hidden.value = val;
+              localRoleValues[k] = val;
+            });
+          }
+          const editBtn = row.querySelector(`[data-ph-edit-default="${k}"]`) as HTMLElement | null;
+          if (editBtn) {
+            editBtn.onclick = () => {
+              const current = String(localFixedDefaults[k] || k);
+              const next = prompt(`设置“${k}”默认值`, current);
+              if (next === null) return;
+              localFixedDefaults[k] = String(next).trim() || k;
+              renderFixedPhList();
+            };
+          }
+        });
+      };
+
       const renderCustomPhList = () => {
-        const listEl = card.querySelector('[data-custom-ph-list]') as HTMLElement;
-        if (!listEl) return;
-        listEl.innerHTML = '';
+        if (!customListEl) return;
+        customListEl.innerHTML = '';
         localCustomPhs.forEach((ph, idx) => {
           const row = pD.createElement('div');
+          row.className = 'fp-row';
           row.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:6px';
+          const currentValue = String(localRoleValues[ph.key] || '');
+          const defaultValue = String(ph.defaultValue || ph.key || '');
           row.innerHTML = `
             <input data-cph-key="${idx}" value="${ph.key}" placeholder="键名" style="width:100px;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px" />
-            <input data-cph-val="${idx}" value="${ph.value}" placeholder="值" style="flex:1;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px" />
+            <div data-cph-picker="${idx}" style="flex:1"></div>
+            <input type="hidden" data-cph-picked="${idx}" />
+            <button type="button" class="fp-btn icon-only" data-cph-edit-default="${idx}" title="编辑默认值">${iconSvg('pencil')}</button>
             <button class="fp-btn icon-only" data-del-cph="${idx}" title="删除" style="padding:4px 8px;font-size:14px;color:#c44">✕</button>
           `;
-          listEl.appendChild(row);
+          customListEl.appendChild(row);
+          const pickerHost = row.querySelector(`[data-cph-picker="${idx}"]`) as HTMLElement | null;
+          const hidden = row.querySelector(`[data-cph-picked="${idx}"]`) as HTMLInputElement | null;
+          if (pickerHost && hidden) {
+            mountValueMultiPicker(pickerHost, defaultValue, currentValue, (val) => {
+              hidden.value = val;
+              const key = String((row.querySelector(`[data-cph-key="${idx}"]`) as HTMLInputElement | null)?.value || ph.key || '').trim();
+              if (key) localRoleValues[key] = val;
+            });
+          }
+          const keyInput = row.querySelector(`[data-cph-key="${idx}"]`) as HTMLInputElement | null;
+          const editBtn = row.querySelector(`[data-cph-edit-default="${idx}"]`) as HTMLElement | null;
+          if (editBtn) {
+            editBtn.onclick = () => {
+              const key = String(keyInput?.value || ph.key || '').trim();
+              const current = String(ph.defaultValue || key);
+              const next = prompt(`设置“${key || '自定义占位符'}”默认值`, current);
+              if (next === null) return;
+              ph.defaultValue = String(next).trim() || key;
+              renderCustomPhList();
+            };
+          }
           (row.querySelector(`[data-del-cph="${idx}"]`) as HTMLElement).onclick = () => {
             localCustomPhs.splice(idx, 1);
             renderCustomPhList();
           };
         });
       };
+
+      renderFixedPhList();
       renderCustomPhList();
       (card.querySelector('[data-add-ph]') as HTMLElement).onclick = () => {
-        localCustomPhs.push({ key: '', value: '' });
+        localCustomPhs.push({ originalKey: '', key: '', defaultValue: '' });
         renderCustomPhList();
+      };
+      if (roleSelectorEl) {
+        roleSelectorEl.onchange = () => {
+          saveRoleValuesBySelection();
+          selectedRoleOption = String(roleSelectorEl.value || ROLE_DEFAULT_OPTION);
+          if (selectedRoleOption !== ROLE_DEFAULT_OPTION && !localAllRoleMeta[selectedRoleOption]) {
+            localAllRoleMeta[selectedRoleOption] = {
+              name: selectedRoleOption === state.activeCharacterId ? (state.activeCharacterName || selectedRoleOption) : selectedRoleOption,
+              lastSeenAt: nowIso(),
+            };
+          }
+          loadRoleValuesBySelection();
+          renderRoleSelector();
+          refreshContextLabel();
+          renderFixedPhList();
+          renderCustomPhList();
+        };
+      }
+      (card.querySelector('[data-reset-ph-defaults]') as HTMLElement | null)!.onclick = () => {
+        if (selectedRoleOption === ROLE_DEFAULT_OPTION) {
+          toast('当前正在编辑默认值，无需重置');
+          return;
+        }
+        for (const k of Object.keys(localRoleValues)) delete localRoleValues[k];
+        selectedWorldbookName = '';
+        worldbookOptions = [];
+        renderWorldbookSourceSelector();
+        if (worldbookStatusEl) worldbookStatusEl.textContent = '已重置为默认值，映射来源：无';
+        renderFixedPhList();
+        renderCustomPhList();
+        toast('已重置为全部默认值');
+      };
+
+      const loadWorldbookOptions = async () => {
+        if (!worldbookStatusEl) return;
+        worldbookStatusEl.textContent = '正在读取世界书列表...';
+        allWorldbookNames = getAllWorldbookNamesSafe();
+        autoSelectedWorldbookNames = getCurrentCharacterBoundWorldbookNames();
+        selectedWorldbookName = autoSelectedWorldbookNames[0] || '';
+        if (!selectedWorldbookName) {
+          for (const k of Object.keys(localRoleValues)) delete localRoleValues[k];
+        }
+        renderWorldbookSourceSelector();
+        worldbookStatusEl.textContent = '正在读取所选世界书条目...';
+        worldbookOptions = await getWorldbookEntryOptionsByNames(selectedWorldbookName ? [selectedWorldbookName] : []);
+        if (!worldbookOptions.length) {
+          worldbookStatusEl.textContent = '未读取到可用世界书条目（可手动切换映射来源）';
+        } else {
+          worldbookStatusEl.textContent = `已加载 ${worldbookOptions.length} 个条目`;
+        }
+        renderFixedPhList();
+        renderCustomPhList();
+      };
+      loadWorldbookOptions();
+
+      if (worldbookSelectorEl) {
+        worldbookSelectorEl.onmousedown = () => {
+          worldbookSelectorWrapEl?.classList.add('is-open');
+        };
+        worldbookSelectorEl.onkeydown = (e) => {
+          const code = (e as KeyboardEvent).key;
+          if (code === 'Enter' || code === ' ' || code === 'ArrowDown' || code === 'ArrowUp') {
+            worldbookSelectorWrapEl?.classList.add('is-open');
+          }
+        };
+        worldbookSelectorEl.onblur = () => {
+          worldbookSelectorWrapEl?.classList.remove('is-open');
+        };
+        worldbookSelectorEl.onchange = async () => {
+          worldbookSelectorWrapEl?.classList.remove('is-open');
+          selectedWorldbookName = String(worldbookSelectorEl.value || '').trim();
+          if (!selectedWorldbookName) {
+            for (const k of Object.keys(localRoleValues)) delete localRoleValues[k];
+          }
+          if (worldbookStatusEl) worldbookStatusEl.textContent = '正在读取所选世界书条目...';
+          worldbookOptions = await getWorldbookEntryOptionsByNames(selectedWorldbookName ? [selectedWorldbookName] : []);
+          if (worldbookStatusEl) {
+            worldbookStatusEl.textContent = worldbookOptions.length
+              ? `已加载 ${worldbookOptions.length} 个条目`
+              : '当前选择下没有可用条目';
+          }
+          renderFixedPhList();
+          renderCustomPhList();
+        };
+      }
+      if (worldbookAutoBtn) {
+        worldbookAutoBtn.onclick = async () => {
+          autoSelectedWorldbookNames = getCurrentCharacterBoundWorldbookNames();
+          selectedWorldbookName = autoSelectedWorldbookNames[0] || '';
+          if (!selectedWorldbookName) {
+            for (const k of Object.keys(localRoleValues)) delete localRoleValues[k];
+          }
+          renderWorldbookSourceSelector();
+          if (autoSelectedWorldbookNames[0]) {
+            toast(`已自动选择角色绑定世界书：${selectedWorldbookName}`);
+          } else {
+            toast('当前角色未绑定世界书，已回退到：无');
+          }
+          if (worldbookStatusEl) worldbookStatusEl.textContent = '已按当前角色自动选择世界书，正在刷新条目...';
+          worldbookOptions = await getWorldbookEntryOptionsByNames(selectedWorldbookName ? [selectedWorldbookName] : []);
+          if (worldbookStatusEl) {
+            worldbookStatusEl.textContent = worldbookOptions.length
+              ? `已加载 ${worldbookOptions.length} 个条目`
+              : '自动选择的世界书暂无可用条目';
+          }
+          renderFixedPhList();
+          renderCustomPhList();
+        };
+      }
+      let roleWatchBusy = false;
+      let lastRoleWatchKey = state.activeCharacterSwitchKey;
+      const roleWatchTimer = setInterval(async () => {
+        if (!pD.body.contains(card)) {
+          clearInterval(roleWatchTimer);
+          return;
+        }
+        if (roleWatchBusy) return;
+        roleWatchBusy = true;
+        try {
+          syncActiveCharacterMapping({ silent: true });
+          const nextKey = state.activeCharacterSwitchKey;
+          if (nextKey !== lastRoleWatchKey) {
+            lastRoleWatchKey = nextKey;
+            renderRoleSelector();
+            allWorldbookNames = getAllWorldbookNamesSafe();
+            autoSelectedWorldbookNames = getCurrentCharacterBoundWorldbookNames();
+            selectedWorldbookName = autoSelectedWorldbookNames[0] || '';
+            if (!selectedWorldbookName) {
+              for (const k of Object.keys(localRoleValues)) delete localRoleValues[k];
+            }
+            renderWorldbookSourceSelector();
+            if (worldbookStatusEl) worldbookStatusEl.textContent = '已检测到角色切换，正在刷新世界书条目...';
+            worldbookOptions = await getWorldbookEntryOptionsByNames(selectedWorldbookName ? [selectedWorldbookName] : []);
+            if (worldbookStatusEl) {
+              worldbookStatusEl.textContent = worldbookOptions.length
+                ? `已加载 ${worldbookOptions.length} 个条目`
+                : '未读取到可用世界书条目（可手动切换映射来源）';
+            }
+            renderFixedPhList();
+            renderCustomPhList();
+            toast('已检测角色切换，世界书来源已刷新');
+          }
+        } finally {
+          roleWatchBusy = false;
+        }
+      }, 900);
+
+      const collectDraftPlaceholders = (): { draft: Record<string, string>; duplicatedKey: string | null } => {
+        const draft: Record<string, string> = {};
+        const usedKeys = new Set<string>();
+        let duplicatedKey: string | null = null;
+        for (const k of rows) {
+          draft[k] = String(localFixedDefaults[k] || k).trim() || k;
+          usedKeys.add(k);
+        }
+        localCustomPhs.forEach((ph, idx) => {
+          const key = (card.querySelector(`[data-cph-key="${idx}"]`) as HTMLInputElement | null)?.value.trim();
+          const val = String(ph.defaultValue || '').trim();
+          if (key && !rows.includes(key)) {
+            if (usedKeys.has(key)) {
+              duplicatedKey = duplicatedKey || key;
+              return;
+            }
+            usedKeys.add(key);
+            draft[key] = val || key;
+            ph.key = key;
+            ph.defaultValue = val || key;
+          } else {
+            ph.key = key || '';
+            ph.defaultValue = val || '';
+          }
+        });
+        return { draft, duplicatedKey };
+      };
+
+      const collectDraftRoleValues = (): Record<string, string> => {
+        const draft: Record<string, string> = {};
+        for (const k of rows) {
+          const defaultVal = String(localFixedDefaults[k] || k).trim();
+          const pickedVal = String((card.querySelector(`[data-ph-picked="${k}"]`) as HTMLInputElement | null)?.value || '').trim();
+          if (pickedVal && pickedVal !== defaultVal) draft[k] = pickedVal;
+        }
+        localCustomPhs.forEach((ph, idx) => {
+          const key = (card.querySelector(`[data-cph-key="${idx}"]`) as HTMLInputElement | null)?.value.trim();
+          const pickedVal = String((card.querySelector(`[data-cph-picked="${idx}"]`) as HTMLInputElement | null)?.value || '').trim();
+          const defaultVal = String(ph.defaultValue || key || '').trim();
+          if (key && !rows.includes(key) && pickedVal) {
+            if (pickedVal && pickedVal !== defaultVal) draft[key] = pickedVal;
+          }
+          ph.key = key || '';
+        });
+        return draft;
+      };
+
+      (card.querySelector('[data-refresh-input]') as HTMLElement | null)!.onclick = () => {
+        const ta = getInputBox();
+        if (!ta) {
+          toast('未找到输入框');
+          return;
+        }
+        const raw = String(ta.value || '');
+        if (!raw) {
+          toast('输入框为空，无需刷新');
+          return;
+        }
+        const { draft, duplicatedKey } = collectDraftPlaceholders();
+        if (duplicatedKey) {
+          toast(`存在重复占位符键：${duplicatedKey}`);
+          return;
+        }
+        const draftRole = collectDraftRoleValues();
+        const next = resolvePlaceholdersWithMap(raw, draft, draftRole);
+        if (next === raw) {
+          toast('未检测到可刷新的占位符');
+          return;
+        }
+        ta.value = next;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        toast('输入框内容已按最新占位符刷新');
       };
 
       const themeSelect = card.querySelector('[data-theme]') as HTMLSelectElement | null;
@@ -2532,6 +5449,11 @@ body {
           const overlay = pD.getElementById(OVERLAY_ID) as HTMLElement | null;
           if (panel) panel.setAttribute('data-theme', themeSelect.value);
           if (overlay) overlay.setAttribute('data-theme', themeSelect.value);
+          if (state.pack) {
+            state.pack.settings.ui = state.pack.settings.ui || { theme: 'herdi-light', customCSS: '' };
+            state.pack.settings.ui.theme = themeSelect.value || 'herdi-light';
+            persistPack();
+          }
         };
       }
 
@@ -2585,7 +5507,9 @@ body {
         };
       }
 
-      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = close;
+      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = () => {
+        close();
+      };
       (card.querySelector('[data-save]') as HTMLElement | null)!.onclick = () => {
         // 收集连接符数据
         const updatedConnectors: ConnectorButton[] = [];
@@ -2616,21 +5540,107 @@ body {
         const toastTimeout = Number((card.querySelector('[data-toast-timeout]') as HTMLInputElement | null)?.value || 1800);
         state.pack!.settings.toast.maxStack = Math.max(1, Math.min(8, toastMax || 4));
         state.pack!.settings.toast.timeout = Math.max(600, Math.min(8000, toastTimeout || 1800));
-        // 收集占位符（包括预定义和自定义）
-        const newPlaceholders: Record<string, string> = {};
-        for (const k of rows) {
-          const el = card.querySelector(`[data-ph="${k}"]`) as HTMLInputElement | null;
-          newPlaceholders[k] = String(el?.value || '').trim() || k;
+
+        localQrLlmSettings.enabledStream = !!(card.querySelector('[data-qr-stream]') as HTMLInputElement | null)?.checked;
+        localQrLlmSettings.generationParams.temperature = Number((card.querySelector('[data-qr-temperature]') as HTMLInputElement | null)?.value || 0.9);
+        localQrLlmSettings.generationParams.top_p = Number((card.querySelector('[data-qr-top-p]') as HTMLInputElement | null)?.value || 1);
+        localQrLlmSettings.generationParams.max_tokens = Number((card.querySelector('[data-qr-max-tokens]') as HTMLInputElement | null)?.value || 1024);
+        localQrLlmSettings.generationParams.presence_penalty = Number((card.querySelector('[data-qr-presence]') as HTMLInputElement | null)?.value || 0);
+        localQrLlmSettings.generationParams.frequency_penalty = Number((card.querySelector('[data-qr-frequency]') as HTMLInputElement | null)?.value || 0);
+        localQrLlmSettings.generationParams.temperature = Math.max(0, Math.min(2, Number.isFinite(localQrLlmSettings.generationParams.temperature) ? localQrLlmSettings.generationParams.temperature : 0.9));
+        localQrLlmSettings.generationParams.top_p = Math.max(0, Math.min(1, Number.isFinite(localQrLlmSettings.generationParams.top_p) ? localQrLlmSettings.generationParams.top_p : 1));
+        localQrLlmSettings.generationParams.max_tokens = Math.max(16, Math.min(8192, Number.isFinite(localQrLlmSettings.generationParams.max_tokens) ? Math.round(localQrLlmSettings.generationParams.max_tokens) : 1024));
+        localQrLlmSettings.generationParams.presence_penalty = Math.max(-2, Math.min(2, Number.isFinite(localQrLlmSettings.generationParams.presence_penalty) ? localQrLlmSettings.generationParams.presence_penalty : 0));
+        localQrLlmSettings.generationParams.frequency_penalty = Math.max(-2, Math.min(2, Number.isFinite(localQrLlmSettings.generationParams.frequency_penalty) ? localQrLlmSettings.generationParams.frequency_penalty : 0));
+        localQrLlmSettings.presetStore = normalizeQrLlmPresetStore(localQrLlmPresetStore);
+        localQrLlmSettings.activePresetName = String((card.querySelector('[data-qr-preset-select]') as HTMLSelectElement | null)?.value || localQrLlmSettings.activePresetName || '').trim();
+        if (!localQrLlmSettings.activePresetName || !localQrLlmSettings.presetStore.presets[localQrLlmSettings.activePresetName]) {
+          localQrLlmSettings.activePresetName = DEFAULT_QR_LLM_PRESET_NAME;
         }
-        // 收集自定义占位符列表
-        localCustomPhs.forEach((_ph, idx) => {
-          const key = (card.querySelector(`[data-cph-key="${idx}"]`) as HTMLInputElement)?.value.trim();
-          const val = (card.querySelector(`[data-cph-val="${idx}"]`) as HTMLInputElement)?.value.trim();
-          if (key && !rows.includes(key)) {
-            newPlaceholders[key] = val || key;
-          }
+        state.pack!.settings.qrLlm = deepClone(localQrLlmSettings);
+
+        localQrLlmSecret.url = String((card.querySelector('[data-qr-api-url]') as HTMLInputElement | null)?.value || localQrLlmSecret.url || '').trim();
+        localQrLlmSecret.apiKey = String((card.querySelector('[data-qr-api-key]') as HTMLInputElement | null)?.value || localQrLlmSecret.apiKey || '');
+        localQrLlmSecret.extraBodyParamsText = String((card.querySelector('[data-qr-extra-body-params]') as HTMLTextAreaElement | null)?.value || localQrLlmSecret.extraBodyParamsText || '');
+        localQrLlmSecret.manualModelId = String((card.querySelector('[data-qr-model-manual]') as HTMLInputElement | null)?.value || localQrLlmSecret.manualModelId || localQrLlmSecret.model || '').trim();
+        localQrLlmSecret.model = localQrLlmSecret.manualModelId || String((card.querySelector('[data-qr-model-select]') as HTMLSelectElement | null)?.value || '').trim();
+        try {
+          parseAdditionalBodyParams(localQrLlmSecret.extraBodyParamsText || '');
+        } catch (e) {
+          toast(`附加参数格式错误: ${e instanceof Error ? e.message : String(e)}`);
+          return;
+        }
+
+        const { draft: newPlaceholders, duplicatedKey } = collectDraftPlaceholders();
+        if (duplicatedKey) {
+          toast(`存在重复占位符键：${duplicatedKey}`);
+          return;
+        }
+        const draftRoleValues = collectDraftRoleValues();
+        const oldPlaceholders = state.pack!.settings.placeholders || {};
+        const oldKeys = new Set(Object.keys(oldPlaceholders));
+        const newKeys = new Set(Object.keys(newPlaceholders));
+        const renamePairs: Array<{ from: string; to: string }> = [];
+        localCustomPhs.forEach((ph) => {
+          const from = String(ph.originalKey || '').trim();
+          const to = String(ph.key || '').trim();
+          if (!from || !to || from === to) return;
+          renamePairs.push({ from, to });
         });
+
+        const roleMaps = localAllRoleMaps;
+        for (const map of Object.values(roleMaps)) {
+          for (const pair of renamePairs) {
+            if (Object.prototype.hasOwnProperty.call(map, pair.from) && !Object.prototype.hasOwnProperty.call(map, pair.to)) {
+              map[pair.to] = map[pair.from];
+            }
+            if (Object.prototype.hasOwnProperty.call(map, pair.from)) delete map[pair.from];
+          }
+          for (const oldKey of oldKeys) {
+            if (!newKeys.has(oldKey) && Object.prototype.hasOwnProperty.call(map, oldKey)) delete map[oldKey];
+          }
+        }
+
+        saveRoleValuesBySelection();
+        if (selectedRoleOption !== ROLE_DEFAULT_OPTION) {
+          const selectedRoleMap = roleMaps[selectedRoleOption] || (roleMaps[selectedRoleOption] = {});
+          for (const key of Object.keys(selectedRoleMap)) {
+            if (newKeys.has(key)) delete selectedRoleMap[key];
+          }
+          for (const [k, v] of Object.entries(draftRoleValues)) {
+            if (newKeys.has(k) && v) selectedRoleMap[k] = v;
+          }
+          localAllRoleMeta[selectedRoleOption] = {
+            name: String(localAllRoleMeta[selectedRoleOption]?.name || (selectedRoleOption === state.activeCharacterId ? state.activeCharacterName : '') || selectedRoleOption),
+            lastSeenAt: nowIso(),
+          };
+        }
+
         state.pack!.settings.placeholders = newPlaceholders;
+        const cleanedRoleMaps: Record<string, Record<string, string>> = {};
+        for (const [characterId, map] of Object.entries(roleMaps)) {
+          const cleanMap: Record<string, string> = {};
+          for (const [k, v] of Object.entries(map || {})) {
+            const key = String(k || '').trim();
+            if (!key || !newKeys.has(key)) continue;
+            cleanMap[key] = String(v || '');
+          }
+          if (Object.keys(cleanMap).length) cleanedRoleMaps[characterId] = cleanMap;
+        }
+        const cleanedMeta: Record<string, { name: string; lastSeenAt: string }> = {};
+        for (const characterId of Object.keys(cleanedRoleMaps)) {
+          const meta = localAllRoleMeta[characterId];
+          cleanedMeta[characterId] = {
+            name: String(meta?.name || characterId),
+            lastSeenAt: String(meta?.lastSeenAt || nowIso()),
+          };
+        }
+        state.pack!.settings.placeholderRoleMaps.byCharacterId = cleanedRoleMaps;
+        state.pack!.settings.placeholderRoleMaps.characterMeta = cleanedMeta;
+        saveQrLlmSecretConfig(localQrLlmSecret);
+        if (localQrLlmSecret.model && !state.qrLlmModelList.includes(localQrLlmSecret.model)) {
+          state.qrLlmModelList = [...state.qrLlmModelList, localQrLlmSecret.model];
+        }
         persistPack();
         renderWorkbench();
         toast('设置已保存');
@@ -2642,6 +5652,10 @@ body {
 
   function openEditItemModal(item: Item | null, presetCategoryId?: string | null): void {
     if (!state.pack) return;
+    state.editGenerateState.isGenerating = false;
+    state.editGenerateState.abortController = null;
+    state.editGenerateState.lastDraftBeforeGenerate = '';
+    state.editGenerateState.lastGeneratedText = '';
     showModal((close) => {
       const card = pD.createElement('div');
       card.className = 'fp-modal-card fp-edit-item-card';
@@ -2658,7 +5672,15 @@ body {
         <div class="fp-modal-title">✏️ 编辑条目</div>
         <div class="fp-edit-scroll">
         <div class="fp-row"><label>名称</label><input data-name value="${item ? item.name : ''}" /></div>
-        <div class="fp-row"><label>执行内容</label><textarea data-content>${item ? item.content : ''}</textarea></div>
+        <div class="fp-row fp-row-block">
+          <label>执行内容</label>
+          <div class="fp-content-editor">
+            <textarea data-content>${item ? item.content : ''}</textarea>
+            <button type="button" class="fp-qr-undo-btn" data-qr-undo style="display:none" title="撤回生成">${iconSvg('undo')}</button>
+            <button type="button" class="fp-qr-gen-btn" data-qr-generate title="AI扩写">${iconSvg('sparkles')}</button>
+          </div>
+        </div>
+        <div data-qr-gen-status class="fp-qr-gen-status"></div>
         <div class="fp-row"><label>执行方式</label>
           <select data-mode>
             <option value="append" ${(item?.mode || state.pack!.settings.defaults.mode) === 'append' ? 'selected' : ''}>追加到输入框</option>
@@ -2689,6 +5711,100 @@ body {
       });
       mountPlaceholderQuickInsert(card, { chipsSelector: '[data-ph-chips]', targetSelector: '[data-content]' });
 
+      const contentEl = card.querySelector('[data-content]') as HTMLTextAreaElement | null;
+      const generateBtn = card.querySelector('[data-qr-generate]') as HTMLButtonElement | null;
+      const undoBtn = card.querySelector('[data-qr-undo]') as HTMLButtonElement | null;
+      const statusEl = card.querySelector('[data-qr-gen-status]') as HTMLElement | null;
+      const setGenerateStatus = (msg: string, level: 'info' | 'ok' | 'warn' | 'error' = 'info') => {
+        if (!statusEl) return;
+        statusEl.textContent = msg;
+        statusEl.style.color = level === 'ok' ? '#4caf50' : (level === 'warn' ? '#d89614' : (level === 'error' ? '#d64848' : 'var(--qr-text-2)'));
+      };
+      const setGeneratingUi = (generating: boolean) => {
+        if (generateBtn) {
+          generateBtn.disabled = generating;
+          generateBtn.classList.toggle('is-loading', generating);
+          generateBtn.title = generating ? '生成中...' : 'AI扩写';
+        }
+      };
+
+      if (undoBtn) {
+        undoBtn.onclick = () => {
+          if (!contentEl) return;
+          const prev = String(state.editGenerateState.lastDraftBeforeGenerate || '');
+          if (!prev) {
+            toast('没有可撤回内容');
+            return;
+          }
+          contentEl.value = prev;
+          state.editGenerateState.lastDraftBeforeGenerate = '';
+          state.editGenerateState.lastGeneratedText = '';
+          undoBtn.style.display = 'none';
+          setGenerateStatus('已撤回到生成前草稿', 'ok');
+          toast('已撤回生成结果');
+        };
+      }
+
+      if (generateBtn) {
+        generateBtn.onclick = async () => {
+          if (!state.pack || !contentEl) return;
+          const draft = String(contentEl.value || '').trim();
+          if (!draft) {
+            toast('执行内容为空，请先输入草稿');
+            setGenerateStatus('执行内容为空，无法生成', 'warn');
+            return;
+          }
+          if (state.editGenerateState.isGenerating) return;
+
+          const ac = new AbortController();
+          state.editGenerateState.abortController = ac;
+          state.editGenerateState.isGenerating = true;
+          state.editGenerateState.lastDraftBeforeGenerate = contentEl.value;
+          setGeneratingUi(true);
+          setGenerateStatus('正在生成扩写内容...');
+
+          const streamEnabled = !!state.pack.settings.qrLlm.enabledStream;
+          if (streamEnabled) {
+            contentEl.value = '';
+          }
+
+          try {
+            const result = await generateQrExpandedContent(draft, {
+              signal: ac.signal,
+              onDelta: streamEnabled
+                ? (text) => {
+                    if (!contentEl) return;
+                    contentEl.value = text;
+                  }
+                : undefined,
+            });
+            const finalText = String(result || '').trim();
+            if (!finalText) throw new Error('生成结果为空');
+            contentEl.value = finalText;
+            state.editGenerateState.lastGeneratedText = finalText;
+            if (undoBtn) undoBtn.style.display = '';
+            setGenerateStatus('扩写完成，可继续编辑或点击撤回恢复草稿', 'ok');
+            toast('执行内容已扩写完成');
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (String(msg).toLowerCase().includes('aborted')) {
+              setGenerateStatus('已取消生成', 'warn');
+              toast('已取消生成');
+            } else {
+              if (streamEnabled && state.editGenerateState.lastDraftBeforeGenerate) {
+                contentEl.value = state.editGenerateState.lastDraftBeforeGenerate;
+              }
+              setGenerateStatus(`生成失败: ${msg}`, 'error');
+              toast(`生成失败: ${msg}`);
+            }
+          } finally {
+            state.editGenerateState.isGenerating = false;
+            state.editGenerateState.abortController = null;
+            setGeneratingUi(false);
+          }
+        };
+      }
+
       if (item) {
         (card.querySelector('[data-del]') as HTMLElement | null)!.onclick = () => {
           if (!confirm('确认删除该条目？')) return;
@@ -2700,7 +5816,10 @@ body {
         };
       }
 
-      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = close;
+      (card.querySelector('[data-close]') as HTMLElement | null)!.onclick = () => {
+        try { state.editGenerateState.abortController?.abort(); } catch (e) {}
+        close();
+      };
       (card.querySelector('[data-save]') as HTMLElement | null)!.onclick = () => {
         const name = (card.querySelector('[data-name]') as HTMLInputElement | null)?.value.trim();
         const content = (card.querySelector('[data-content]') as HTMLTextAreaElement | null)?.value.trim();
@@ -2909,7 +6028,7 @@ body {
           <label>附加导入</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--qr-text-2);width:auto">
             <input type="checkbox" data-include-settings checked />
-            <span>导入设置（占位符 / 连接符 / 主题 / 自定义CSS）</span>
+            <span>导入设置（占位符默认值 / 角色映射 / 连接符 / 主题 / 自定义CSS）</span>
           </label>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;max-height:52vh;overflow:hidden">
@@ -3203,6 +6322,37 @@ body {
         openImportSelectionModal(incoming, (selectedIncoming, includeSettings) => {
           if (!selectedIncoming) return;
           if (!state.pack) return;
+          const askRoleMapPolicyThenApply = (doApply: (policy: 'skip' | 'overwrite') => void) => {
+            if (!includeSettings || !hasPlaceholderRoleMapConflict(state.pack!.settings, selectedIncoming.settings)) {
+              doApply('overwrite');
+              return;
+            }
+            showModal((closePolicy) => {
+              const policyCard = pD.createElement('div');
+              policyCard.className = 'fp-modal-card';
+              policyCard.innerHTML = `
+                <div class="fp-modal-title">⚖️ 映射冲突处理</div>
+                <div style="font-size:12px;color:#a7c8bc;margin-bottom:10px">检测到角色映射冲突，请选择一次性全局策略。</div>
+                <div class="fp-row"><label>策略</label>
+                  <select data-map-policy>
+                    <option value="skip">全部跳过冲突键（保留本地）</option>
+                    <option value="overwrite" selected>全部覆盖冲突键（采用导入）</option>
+                  </select>
+                </div>
+                <div class="fp-actions">
+                  <button data-close>取消</button>
+                  <button class="primary" data-apply>确认</button>
+                </div>
+              `;
+              (policyCard.querySelector('[data-close]') as HTMLElement | null)!.onclick = closePolicy;
+              (policyCard.querySelector('[data-apply]') as HTMLElement | null)!.onclick = () => {
+                const policy = ((policyCard.querySelector('[data-map-policy]') as HTMLSelectElement | null)?.value || 'overwrite') as 'skip' | 'overwrite';
+                closePolicy();
+                doApply(policy);
+              };
+              return policyCard;
+            });
+          };
 
           interface ConflictItem {
             type: 'category' | 'item';
@@ -3234,8 +6384,10 @@ body {
           }
 
           if (!conflicts.length) {
-            applyImport(selectedIncoming, [], includeSettings);
-            close();
+            askRoleMapPolicyThenApply((policy) => {
+              applyImport(selectedIncoming, [], includeSettings, policy);
+              close();
+            });
             return;
           }
 
@@ -3276,9 +6428,11 @@ body {
                 c.action = (c2.querySelector(`[data-action="${idx}"]`) as HTMLSelectElement | null)?.value as ConflictItem['action'] || 'skip';
                 c.rename = (c2.querySelector(`[data-rename="${idx}"]`) as HTMLInputElement | null)?.value.trim() || '';
               });
-              applyImport(selectedIncoming, conflicts, includeSettings);
-              closeConflict();
-              close();
+              askRoleMapPolicyThenApply((policy) => {
+                applyImport(selectedIncoming, conflicts, includeSettings, policy);
+                closeConflict();
+                close();
+              });
             };
 
             return c2;
@@ -3298,7 +6452,58 @@ body {
     rename: string;
   }
 
-  function applyImport(incoming: Pack, conflicts: ImportConflict[], includeSettings = false): void {
+  function hasPlaceholderRoleMapConflict(localSettings: Settings, incomingSettings: Settings): boolean {
+    const localMaps = localSettings?.placeholderRoleMaps?.byCharacterId || {};
+    const incomingMaps = incomingSettings?.placeholderRoleMaps?.byCharacterId || {};
+    for (const [characterId, incomingMap] of Object.entries(incomingMaps)) {
+      const localMap = localMaps[characterId];
+      if (!localMap) continue;
+      for (const [placeholderKey, incomingValue] of Object.entries(incomingMap || {})) {
+        if (!Object.prototype.hasOwnProperty.call(localMap, placeholderKey)) continue;
+        if (String(localMap[placeholderKey] || '') !== String(incomingValue || '')) return true;
+      }
+    }
+    return false;
+  }
+
+  function mergePlaceholderRoleMaps(
+    localSettings: Settings,
+    incomingSettings: Settings,
+    policy: 'skip' | 'overwrite',
+  ): Settings['placeholderRoleMaps'] {
+    const localMaps = localSettings?.placeholderRoleMaps || { byCharacterId: {}, characterMeta: {} };
+    const incomingMaps = incomingSettings?.placeholderRoleMaps || { byCharacterId: {}, characterMeta: {} };
+    const mergedByCharacterId: Record<string, Record<string, string>> = deepClone(localMaps.byCharacterId || {});
+    const mergedMeta: Record<string, { name: string; lastSeenAt: string }> = deepClone(localMaps.characterMeta || {});
+
+    for (const [characterId, incomingMap] of Object.entries(incomingMaps.byCharacterId || {})) {
+      const cur = mergedByCharacterId[characterId] || {};
+      for (const [placeholderKey, incomingValue] of Object.entries(incomingMap || {})) {
+        const hasLocal = Object.prototype.hasOwnProperty.call(cur, placeholderKey);
+        if (!hasLocal || policy === 'overwrite') cur[placeholderKey] = String(incomingValue || '');
+      }
+      mergedByCharacterId[characterId] = cur;
+    }
+
+    for (const [characterId, meta] of Object.entries(incomingMaps.characterMeta || {})) {
+      const localMeta = mergedMeta[characterId];
+      if (!localMeta || policy === 'overwrite') {
+        mergedMeta[characterId] = {
+          name: String(meta?.name || ''),
+          lastSeenAt: String(meta?.lastSeenAt || nowIso()),
+        };
+      }
+    }
+
+    return { byCharacterId: mergedByCharacterId, characterMeta: mergedMeta };
+  }
+
+  function applyImport(
+    incoming: Pack,
+    conflicts: ImportConflict[],
+    includeSettings = false,
+    placeholderMapPolicy: 'skip' | 'overwrite' = 'overwrite',
+  ): void {
     if (!state.pack) return;
     const next = deepClone(state.pack);
 
@@ -3364,6 +6569,7 @@ body {
 
     if (includeSettings) {
       next.settings = deepClone(incoming.settings);
+      next.settings.placeholderRoleMaps = mergePlaceholderRoleMaps(state.pack.settings, incoming.settings, placeholderMapPolicy);
     }
 
     state.pack = normalizePack(next);
@@ -3979,45 +7185,61 @@ body {
     const minSide = 220;
     const maxSide = 520;
 
-    splitV.onmousedown = (e) => {
+    splitV.onpointerdown = (e: PointerEvent) => {
       e.preventDefault();
+      try { splitV.setPointerCapture(e.pointerId); } catch (err) {}
       const startX = e.clientX;
       const startW = sidebar.getBoundingClientRect().width;
-      const move = (ev: MouseEvent) => {
+      (pD.body || pD.documentElement).classList.add('fp-drag-active');
+      const move = (ev: PointerEvent) => {
+        ev.preventDefault();
         const next = Math.min(maxSide, Math.max(minSide, startW + (ev.clientX - startX)));
         sidebar.style.width = `${next}px`;
       };
-      const up = () => {
-        pD.removeEventListener('mousemove', move);
-        pD.removeEventListener('mouseup', up);
+      const up = (ev: PointerEvent) => {
+        pW.removeEventListener('pointermove', move as EventListener);
+        pW.removeEventListener('pointerup', up as EventListener);
+        pW.removeEventListener('pointercancel', up as EventListener);
+        (pD.body || pD.documentElement).classList.remove('fp-drag-active');
+        try { splitV.releasePointerCapture(ev.pointerId); } catch (err) {}
         if (state.pack) {
           state.pack.uiState.sidebar.width = Math.round(sidebar.getBoundingClientRect().width);
           persistPack();
         }
       };
-      pD.addEventListener('mousemove', move);
-      pD.addEventListener('mouseup', up);
+      pW.addEventListener('pointermove', move as EventListener, { passive: false });
+      pW.addEventListener('pointerup', up as EventListener, { passive: false });
+      pW.addEventListener('pointercancel', up as EventListener, { passive: false });
     };
 
-    splitH.onmousedown = (e) => {
+    splitH.onpointerdown = (e: PointerEvent) => {
       e.preventDefault();
+      try { splitH.setPointerCapture(e.pointerId); } catch (err) {}
       const startY = e.clientY;
       const startH = bottom.getBoundingClientRect().height;
       const panelH = panel.getBoundingClientRect().height;
-      const move = (ev: MouseEvent) => {
+      bottom.classList.add('is-resizing');
+      (pD.body || pD.documentElement).classList.add('fp-drag-active');
+      const move = (ev: PointerEvent) => {
+        ev.preventDefault();
         const next = Math.min(panelH * 0.55, Math.max(90, startH - (ev.clientY - startY)));
         bottom.style.height = `${next}px`;
       };
-      const up = () => {
-        pD.removeEventListener('mousemove', move);
-        pD.removeEventListener('mouseup', up);
+      const up = (ev: PointerEvent) => {
+        pW.removeEventListener('pointermove', move as EventListener);
+        pW.removeEventListener('pointerup', up as EventListener);
+        pW.removeEventListener('pointercancel', up as EventListener);
+        bottom.classList.remove('is-resizing');
+        (pD.body || pD.documentElement).classList.remove('fp-drag-active');
+        try { splitH.releasePointerCapture(ev.pointerId); } catch (err) {}
         if (state.pack) {
           state.pack.uiState.preview.height = Math.round(bottom.getBoundingClientRect().height);
           persistPack();
         }
       };
-      pD.addEventListener('mousemove', move);
-      pD.addEventListener('mouseup', up);
+      pW.addEventListener('pointermove', move as EventListener, { passive: false });
+      pW.addEventListener('pointerup', up as EventListener, { passive: false });
+      pW.addEventListener('pointercancel', up as EventListener, { passive: false });
     };
   }
 
@@ -4157,7 +7379,7 @@ body {
 
       const compactBottomHead = pD.createElement('div');
       compactBottomHead.className = 'fp-bottom-head';
-      compactBottomHead.innerHTML = '<span>预览令牌流</span><div style="display:flex;align-items:center;gap:6px"><button class="fp-btn" data-clear-preview title="清空预览令牌流">清空</button><button class="fp-btn icon-only" data-toggle-preview title="收起/展开">' + iconSvg(previewExpanded ? 'chevron-down' : 'chevron-up') + '</button></div>';
+      compactBottomHead.innerHTML = '<span>预览令牌流</span><div class="fp-bottom-actions"><button class="fp-btn fp-preview-btn" data-clear-preview title="清空预览令牌流">清空</button><button class="fp-btn fp-preview-btn icon-only" data-toggle-preview title="收起/展开">' + iconSvg(previewExpanded ? 'chevron-down' : 'chevron-up') + '</button></div>';
 
       const compactPreview = pD.createElement('div');
       compactPreview.className = 'fp-preview';
@@ -4196,7 +7418,7 @@ body {
       const allExpanded = state.pack.categories.length > 0 && state.pack.categories.every((c) => expandedMap[c.id] !== false);
       const treeToggleTitle = allExpanded ? '全部折叠' : '全部展开';
       const treeToggleIcon = allExpanded ? 'collapse-all' : 'expand-all';
-      sideHead.innerHTML = '<input class="fp-input" placeholder="筛选分类/条目" /><div class="fp-tree-tools"><button class="fp-tree-tool-btn" data-tree-toggle title="' + treeToggleTitle + '">' + iconSvg(treeToggleIcon) + '</button></div>';
+      sideHead.innerHTML = '<div class="fp-side-search"><input class="fp-input fp-side-search-input" placeholder="筛选分类/条目" /><div class="fp-tree-tools"><button class="fp-tree-tool-btn" data-tree-toggle title="' + treeToggleTitle + '">' + iconSvg(treeToggleIcon) + '</button></div></div>';
 
       const tree = pD.createElement('div');
       tree.className = 'fp-tree';
@@ -4232,7 +7454,7 @@ body {
 
       bottomHead = pD.createElement('div');
       bottomHead.className = 'fp-bottom-head';
-      bottomHead.innerHTML = '<span>预览令牌流</span><div style="display:flex;align-items:center;gap:6px"><button class="fp-btn" data-clear-preview title="清空预览令牌流">清空</button><button class="fp-btn icon-only" data-toggle-preview title="收起/展开">' + iconSvg(previewExpanded ? 'chevron-down' : 'chevron-up') + '</button></div>';
+      bottomHead.innerHTML = '<span>预览令牌流</span><div class="fp-bottom-actions"><button class="fp-btn fp-preview-btn" data-clear-preview title="清空预览令牌流">清空</button><button class="fp-btn fp-preview-btn icon-only" data-toggle-preview title="收起/展开">' + iconSvg(previewExpanded ? 'chevron-down' : 'chevron-up') + '</button></div>';
 
       const preview = pD.createElement('div');
       preview.className = 'fp-preview';
@@ -4336,7 +7558,15 @@ body {
     const connCustomBtn = top.querySelector('[data-conn-custom]') as HTMLElement | null;
     if (connCustomBtn) connCustomBtn.onclick = () => openCustomConnectorActionModal();
     const settingsBtn = top.querySelector('[data-settings]') as HTMLElement | null;
-    if (settingsBtn) settingsBtn.onclick = openSettingsModal;
+    if (settingsBtn) settingsBtn.onclick = () => {
+      try {
+        openSettingsModal();
+      } catch (e) {
+        const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+        pushDebugLog('打开设置失败', msg);
+        toast(`打开设置失败: ${msg}`);
+      }
+    };
     // import/export 按钮只在非 compact 模式下存在
     const importBtn = top.querySelector('[data-import]') as HTMLElement | null;
     if (importBtn) importBtn.onclick = openImportModal;
@@ -4455,6 +7685,7 @@ body {
   }
 
   function openWorkbench() {
+    syncActiveCharacterMapping({ silent: true });
     closeWorkbench();
     ensureStyle();
     applyCustomCSS();
@@ -4521,8 +7752,31 @@ body {
     renderWorkbench();
   }
 
+  function attachGlobalDebugHooks(): void {
+    if (state.debugHooksBound) return;
+    state.debugHooksBound = true;
+    try {
+      pW.addEventListener('error', (ev) => {
+        const e = ev as ErrorEvent;
+        logError('全局异常', {
+          message: String(e.message || ''),
+          source: String(e.filename || ''),
+          line: Number(e.lineno || 0),
+          column: Number(e.colno || 0),
+        });
+      });
+      pW.addEventListener('unhandledrejection', (ev) => {
+        const e = ev as PromiseRejectionEvent;
+        logError('未处理Promise拒绝', e.reason);
+      });
+    } catch (e) {}
+  }
+
   function bootstrap() {
+    attachGlobalDebugHooks();
     state.pack = loadPack();
+    loadQrLlmSecretConfig();
+    syncActiveCharacterMapping({ silent: true, force: true });
 
     const roots = state.pack.categories.filter((c) => c.parentId === null).sort((a, b) => a.order - b.order);
     if (!state.currentCategoryId) {
@@ -4549,6 +7803,7 @@ body {
       }
     } catch (e) {
       console.error('[快速回复管理器] 按钮注册失败', e);
+      logError('按钮注册失败', String(e));
     }
 
     try {
@@ -4556,13 +7811,27 @@ body {
       eventOn(ev, openWorkbench);
     } catch (e) {
       console.error('[快速回复管理器] 事件监听失败', e);
+      logError('事件监听失败', String(e));
     }
+    try {
+      eventOn(tavern_events.CHAT_CHANGED, () => {
+        const prevKey = state.activeCharacterSwitchKey;
+        syncActiveCharacterMapping();
+        if (prevKey !== state.activeCharacterSwitchKey) persistPack();
+      });
+      eventOn(tavern_events.CHARACTER_PAGE_LOADED, () => {
+        const prevKey = state.activeCharacterSwitchKey;
+        syncActiveCharacterMapping();
+        if (prevKey !== state.activeCharacterSwitchKey) persistPack();
+      });
+    } catch (e) {}
 
     pD.addEventListener('click', (e) => {
       if (state.contextMenu && !(e.target as HTMLElement).closest('.fp-menu')) closeContextMenu();
     });
 
     console.log('[快速回复管理器] 已加载');
+    logInfo('脚本已加载');
   }
 
   bootstrap();
