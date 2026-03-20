@@ -9,6 +9,7 @@
   const TOAST_CONTAINER_ID = 'fast-plot-toast-container';
   const QR_LLM_SECRET_KEY = 'fastPlotQRLlmSecret';
   const DEFAULT_QR_LLM_PRESET_NAME = '默认预设';
+  const DEFAULT_QR_LLM_PRESET_VERSION = 2;
   const DATA_VERSION = 1;
 
   const THEME_NAMES: Record<string, string> = {
@@ -93,6 +94,7 @@
 
   interface QrLlmPresetStore {
     version: 1;
+    defaultPresetVersion?: number;
     presets: Record<string, QrLlmPreset>;
   }
 
@@ -578,100 +580,114 @@
 
   function buildDefaultQrLlmPresetStore(): QrLlmPresetStore {
     const now = nowIso();
+    const defaultPromptGroup = [
+      {
+        id: uid('qrp'),
+        role: 'ASSISTANT' as const,
+        name: '执行角色',
+        position: 'RELATIVE' as const,
+        enabled: true,
+        injectionDepth: 4,
+        injectionOrder: 100,
+        content: [
+          '你是“快速回复执行内容润写助手”。',
+          '把用户给出的简短草稿润成可直接使用的一小段自然中文。',
+          '必须保持草稿原意，不擅自改目标，不偷换人物关系。',
+        ].join('\n'),
+      },
+      {
+        id: uid('qrp'),
+        role: 'SYSTEM' as const,
+        name: '回复格式规范',
+        position: 'RELATIVE' as const,
+        enabled: true,
+        injectionDepth: 4,
+        injectionOrder: 100,
+        content: [
+          '只输出最终可执行正文。',
+          '默认写成 1 段自然语言，不列提纲、不编号、不分条。',
+          '不要输出解释、注释、前言、后记、分析过程。',
+          '不要写“执行要求如下”“当前场景聚焦于”这类模板腔。',
+          '不要输出 Markdown 代码块围栏。',
+        ].join('\n'),
+      },
+      {
+        id: uid('qrp'),
+        role: 'USER' as const,
+        name: 'QR草稿输入',
+        position: 'RELATIVE' as const,
+        enabled: true,
+        injectionDepth: 4,
+        injectionOrder: 100,
+        content: [
+          '【草稿】',
+          '{{draft}}',
+          '',
+          '【草稿中已出现的占位符原文】',
+          '{{draft_placeholder_tokens}}',
+          '',
+          '【可用占位符】',
+          '{{placeholder_list}}',
+          '',
+          '【占位符映射(JSON)】',
+          '{{placeholder_map_json}}',
+        ].join('\n'),
+      },
+      {
+        id: uid('qrp'),
+        role: 'SYSTEM' as const,
+        name: '变量MAP使用规范',
+        position: 'RELATIVE' as const,
+        enabled: true,
+        injectionDepth: 4,
+        injectionOrder: 100,
+        content: [
+          '草稿里已经出现的占位符，必须原样保留并沿用，不要改写成别的格式。',
+          '如果占位符在映射中有值，可以用来理解语义，但输出时优先复用草稿里的原占位符文本。',
+          '未映射的占位符保持原样，不要删除、不硬编码。',
+          '不要新增未提供的新占位符键名。',
+          '保持占位符结构可替换性，不破坏现有占位符语法。',
+        ].join('\n'),
+      },
+      {
+        id: uid('qrp'),
+        role: 'SYSTEM' as const,
+        name: '扩写策略',
+        position: 'RELATIVE' as const,
+        enabled: true,
+        injectionDepth: 4,
+        injectionOrder: 100,
+        content: [
+          '优先补足最必要的信息，让句子顺、清楚、能直接用。',
+          '除非草稿本身信息很多，否则控制在 1 到 3 句，不要明显扩太长。',
+          '避免空泛套话，避免与草稿无关的新增设定，避免过度戏剧化和过强结构感。',
+        ].join('\n'),
+      },
+    ];
     return {
       version: 1,
+      defaultPresetVersion: DEFAULT_QR_LLM_PRESET_VERSION,
       presets: {
         [DEFAULT_QR_LLM_PRESET_NAME]: {
           systemPrompt: '',
           userPromptTemplate: '',
-          promptGroup: [
-            {
-              id: uid('qrp'),
-              role: 'ASSISTANT',
-              name: '执行角色',
-              position: 'RELATIVE',
-              enabled: true,
-              injectionDepth: 4,
-              injectionOrder: 100,
-              content: [
-                '你是“快速回复执行内容润写助手”。',
-                '把用户给出的简短草稿润成可直接使用的一小段自然中文。',
-                '必须保持草稿原意，不擅自改目标，不偷换人物关系。',
-              ].join('\n'),
-            },
-            {
-              id: uid('qrp'),
-              role: 'SYSTEM',
-              name: '回复格式规范',
-              position: 'RELATIVE',
-              enabled: true,
-              injectionDepth: 4,
-              injectionOrder: 100,
-              content: [
-                '只输出最终可执行正文。',
-                '默认写成 1 段自然语言，不列提纲、不编号、不分条。',
-                '不要输出解释、注释、前言、后记、分析过程。',
-                '不要写“执行要求如下”“当前场景聚焦于”这类模板腔。',
-                '不要输出 Markdown 代码块围栏。',
-              ].join('\n'),
-            },
-            {
-              id: uid('qrp'),
-              role: 'USER',
-              name: 'QR草稿输入',
-              position: 'RELATIVE',
-              enabled: true,
-              injectionDepth: 4,
-              injectionOrder: 100,
-              content: [
-                '【草稿】',
-                '{{draft}}',
-                '',
-                '【草稿中已出现的占位符原文】',
-                '{{draft_placeholder_tokens}}',
-                '',
-                '【可用占位符】',
-                '{{placeholder_list}}',
-                '',
-                '【占位符映射(JSON)】',
-                '{{placeholder_map_json}}',
-              ].join('\n'),
-            },
-            {
-              id: uid('qrp'),
-              role: 'SYSTEM',
-              name: '变量MAP使用规范',
-              position: 'RELATIVE',
-              enabled: true,
-              injectionDepth: 4,
-              injectionOrder: 100,
-              content: [
-                '草稿里已经出现的占位符，必须原样保留并沿用，不要改写成别的格式。',
-                '如果占位符在映射中有值，可以用来理解语义，但输出时优先复用草稿里的原占位符文本。',
-                '未映射的占位符保持原样，不要删除、不硬编码。',
-                '不要新增未提供的新占位符键名。',
-                '保持占位符结构可替换性，不破坏现有占位符语法。',
-              ].join('\n'),
-            },
-            {
-              id: uid('qrp'),
-              role: 'SYSTEM',
-              name: '扩写策略',
-              position: 'RELATIVE',
-              enabled: true,
-              injectionDepth: 4,
-              injectionOrder: 100,
-              content: [
-                '优先补足最必要的信息，让句子顺、清楚、能直接用。',
-                '除非草稿本身信息很多，否则控制在 1 到 3 句，不要明显扩太长。',
-                '避免空泛套话，避免与草稿无关的新增设定，避免过度戏剧化和过强结构感。',
-              ].join('\n'),
-            },
-          ],
+          promptGroup: defaultPromptGroup,
           updatedAt: now,
         },
       },
     };
+  }
+
+  function sanitizeDefaultQrLlmPreset(preset: QrLlmPreset): QrLlmPreset {
+    const filteredPromptGroup = normalizePromptGroup(preset.promptGroup).filter((seg) => {
+      const marker = `${String(seg.name || '')} ${String(seg.note || '')}`.toLowerCase();
+      return !marker.includes('final');
+    });
+    return compileQrLlmPreset({
+      ...preset,
+      promptGroup: filteredPromptGroup,
+      finalSystemDirective: '',
+    });
   }
 
   function normalizePromptGroup(
@@ -749,7 +765,6 @@
 
   function compileQrLlmPreset(preset: QrLlmPreset): QrLlmPreset {
     const promptGroup = normalizePromptGroup(preset.promptGroup);
-    const finalSystemDirective = String(preset.finalSystemDirective || '').trim();
     const activePromptGroup = promptGroup.filter((x) => x.enabled !== false);
     const relativePromptGroup = activePromptGroup.filter((x) => String(x.position || 'RELATIVE') === 'RELATIVE');
     const chatPromptGroup = activePromptGroup.filter((x) => String(x.position || 'RELATIVE') === 'CHAT');
@@ -765,17 +780,13 @@
         .map((x) => `[${x.role}] ${String(x.content || '').trim()}`)
         .filter((x) => String(x || '').trim());
       if (systemSegs.length) {
-        const systemParts = [...systemSegs];
-        if (finalSystemDirective) systemParts.push(finalSystemDirective);
-        systemPrompt = systemParts.join('\n\n');
+        systemPrompt = systemSegs.join('\n\n');
       }
       const userParts: string[] = [];
       if (userSegs.length) userParts.push(userSegs.join('\n\n'));
       if (assistantSegs.length) userParts.push(assistantSegs.join('\n\n'));
       if (chatSegs.length) userParts.push(chatSegs.join('\n\n'));
       if (userParts.length) userPromptTemplate = userParts.join('\n\n');
-    } else if (finalSystemDirective) {
-      systemPrompt = [systemPrompt, finalSystemDirective].filter(Boolean).join('\n\n');
     }
 
     if (!systemPrompt) systemPrompt = '你是执行内容扩写助手。';
@@ -785,7 +796,7 @@
       systemPrompt,
       userPromptTemplate,
       promptGroup: promptGroup.length ? promptGroup : undefined,
-      finalSystemDirective: finalSystemDirective || undefined,
+      finalSystemDirective: undefined,
       updatedAt: String(preset.updatedAt || nowIso()),
     };
   }
@@ -793,6 +804,7 @@
   function normalizeQrLlmPresetStore(store: QrLlmPresetStore | null | undefined): QrLlmPresetStore {
     const safe = (store && typeof store === 'object' ? deepClone(store) : { version: 1, presets: {} }) as QrLlmPresetStore;
     safe.version = 1;
+    const currentDefaultPresetVersion = Number(safe.defaultPresetVersion) || 0;
     safe.presets = (safe.presets && typeof safe.presets === 'object') ? safe.presets : {};
     const legacyDefaultNames = ['默认扩写预设', '默认预设(旧)', 'default'];
     legacyDefaultNames.forEach((legacy) => {
@@ -815,20 +827,22 @@
         updatedAt: String(preset.updatedAt || nowIso()),
       });
     }
-    if (!safe.presets[DEFAULT_QR_LLM_PRESET_NAME]) {
-      const def = buildDefaultQrLlmPresetStore().presets[DEFAULT_QR_LLM_PRESET_NAME];
+    const defaultStore = buildDefaultQrLlmPresetStore();
+    const defaultPreset = defaultStore.presets[DEFAULT_QR_LLM_PRESET_NAME];
+    const shouldRefreshDefaultPreset = currentDefaultPresetVersion < DEFAULT_QR_LLM_PRESET_VERSION;
+    if (!safe.presets[DEFAULT_QR_LLM_PRESET_NAME] || shouldRefreshDefaultPreset) {
+      const def = defaultPreset;
       safe.presets[DEFAULT_QR_LLM_PRESET_NAME] = deepClone(def);
     } else {
-      const def = buildDefaultQrLlmPresetStore().presets[DEFAULT_QR_LLM_PRESET_NAME];
+      const def = defaultPreset;
       const migrated = safe.presets[DEFAULT_QR_LLM_PRESET_NAME];
       if (!normalizePromptGroup(migrated.promptGroup).length) {
         safe.presets[DEFAULT_QR_LLM_PRESET_NAME].promptGroup = deepClone(def.promptGroup);
       }
-      if (!String(migrated.finalSystemDirective || '').trim()) {
-        safe.presets[DEFAULT_QR_LLM_PRESET_NAME].finalSystemDirective = def.finalSystemDirective;
-      }
-      safe.presets[DEFAULT_QR_LLM_PRESET_NAME] = compileQrLlmPreset(safe.presets[DEFAULT_QR_LLM_PRESET_NAME]);
+      safe.presets[DEFAULT_QR_LLM_PRESET_NAME] = sanitizeDefaultQrLlmPreset(safe.presets[DEFAULT_QR_LLM_PRESET_NAME]);
     }
+    safe.presets[DEFAULT_QR_LLM_PRESET_NAME] = sanitizeDefaultQrLlmPreset(safe.presets[DEFAULT_QR_LLM_PRESET_NAME]);
+    safe.defaultPresetVersion = DEFAULT_QR_LLM_PRESET_VERSION;
     return safe;
   }
 
@@ -1672,13 +1686,19 @@ body {
 .fp-qr-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
 .fp-qr-card-title{font-size:12px;font-weight:800;color:var(--qr-text-1)}
 .fp-qr-seg-list{display:flex;flex-direction:column;gap:6px}
-.fp-qr-seg-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--qr-border-2);border-radius:10px;background:var(--qr-bg-input)}
+.fp-qr-seg-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--qr-border-2);border-radius:10px;background:var(--qr-bg-input)}
 .fp-qr-seg-row.is-dragging{display:none}
+.fp-qr-seg-row.is-disabled .fp-qr-seg-note{opacity:.55}
 .fp-qr-seg-main{min-width:0;display:flex;align-items:center}
 .fp-qr-seg-note{font-size:13px;font-weight:700;color:var(--qr-text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fp-qr-seg-ops{display:flex;gap:6px;align-items:center}
 .fp-qr-seg-ops .fp-btn{padding:0;min-height:28px;min-width:28px;width:28px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center}
 .fp-qr-seg-ops .fp-btn .fp-ico{margin-right:0;width:13px;height:13px}
+.fp-qr-seg-switch{position:relative;display:inline-flex;align-items:center;justify-content:flex-start;width:40px;height:24px;padding:2px;border:none;border-radius:999px;background:rgba(127,127,137,.26);cursor:pointer;transition:background .18s ease,box-shadow .18s ease,opacity .18s ease}
+.fp-qr-seg-switch::before{content:"";display:block;width:18px;height:18px;border-radius:999px;background:var(--qr-bg-3);transition:transform .2s cubic-bezier(.22,.8,.32,1)}
+.fp-qr-seg-switch.is-on{background:var(--qr-accent);box-shadow:0 0 0 2px rgba(96,166,255,.14)}
+.fp-qr-seg-switch.is-on::before{transform:translateX(16px)}
+.fp-qr-seg-switch:not(.is-on){opacity:.9}
 .fp-qr-drag-handle{width:22px;min-width:22px;height:28px;padding:0;border:none;background:transparent;box-shadow:none;display:inline-flex;align-items:center;justify-content:center;cursor:grab;color:var(--qr-text-2);opacity:.8;transition:opacity .15s ease,transform .12s ease,color .15s ease}
 .fp-qr-drag-handle:hover{opacity:1;color:var(--qr-text-1)}
 .fp-qr-drag-handle:active{cursor:grabbing;transform:scale(.96)}
@@ -1721,7 +1741,63 @@ body {
 .fp-qr-preset-workbench{display:flex;flex-direction:column;gap:10px}
 .fp-qr-bar{display:flex;gap:8px;align-items:stretch;flex-wrap:nowrap}
 .fp-qr-bar .fp-btn{min-height:var(--qr-control-min-h);height:var(--qr-control-min-h)}
-.fp-qr-preset-action{min-width:64px;padding:0 14px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+.fp-qr-preset-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.fp-qr-preset-head .fp-qr-note{margin:0;flex:1 1 260px;font-size:11px;line-height:1.45;letter-spacing:.12px;color:color-mix(in srgb,var(--qr-text-2) 84%, var(--qr-text-1) 16%)}
+.fp-qr-preset-topbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center}
+.fp-qr-preset-topbar .fp-select{min-width:0;width:100%}
+.fp-qr-preset-topbar .fp-select{
+  border-radius:13px;
+  border:1px solid color-mix(in srgb,var(--qr-btn-border) 76%, transparent);
+  background:color-mix(in srgb,var(--qr-bg-input) 96%, var(--qr-bg-2) 4%);
+  box-shadow:none;
+}
+.fp-qr-preset-topbar .fp-select:focus{
+  border-color:color-mix(in srgb,var(--qr-accent) 55%, var(--qr-btn-border) 45%);
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--qr-accent) 18%, transparent);
+}
+.fp-qr-preset-tools{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  height:var(--qr-control-min-h);
+  min-height:var(--qr-control-min-h);
+  padding:0;
+  box-sizing:border-box;
+  border:none;
+  background:transparent;
+  box-shadow:none;
+  flex:0 0 auto;
+}
+.fp-qr-preset-action{
+  min-width:28px;
+  width:28px;
+  height:28px;
+  min-height:28px;
+  padding:0;
+  border:none;
+  background:transparent!important;
+  box-shadow:none!important;
+  border-radius:7px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  flex:0 0 auto;
+  color:color-mix(in srgb,var(--qr-text-2) 92%, var(--qr-text-1) 8%);
+  transition:background .14s ease,color .14s ease,opacity .14s ease;
+  outline:none;
+}
+.fp-qr-preset-action .fp-ico{width:14px;height:14px;margin-right:0}
+.fp-qr-preset-action:hover{
+  background:color-mix(in srgb,var(--qr-bg-hover) 82%, transparent)!important;
+  color:var(--qr-text-1);
+}
+.fp-qr-preset-action:active{background:color-mix(in srgb,var(--qr-bg-hover) 94%, transparent)!important}
+.fp-qr-preset-action:focus-visible{box-shadow:0 0 0 2px color-mix(in srgb,var(--qr-accent) 22%, transparent)}
+.fp-qr-preset-tools.is-file .fp-qr-preset-action[data-qr-preset-save]{color:color-mix(in srgb,var(--qr-accent) 74%, var(--qr-text-2) 26%)}
+.fp-qr-preset-tools.is-file .fp-qr-preset-action[data-qr-preset-save]:hover{background:color-mix(in srgb,var(--qr-accent) 10%, transparent)!important;color:var(--qr-accent)}
+.fp-qr-preset-action[data-qr-preset-delete]{color:color-mix(in srgb,#d85c5c 78%, var(--qr-text-2) 22%)}
+.fp-qr-preset-action[data-qr-preset-delete]:hover{background:color-mix(in srgb,#d85c5c 10%, transparent)!important;color:#e06b6b}
+.fp-qr-preset-action[data-qr-preset-reset-default]:hover{background:color-mix(in srgb,var(--qr-accent) 8%, transparent)!important}
 .fp-qr-bar .fp-select{flex:1;min-width:180px;height:var(--qr-control-min-h);min-height:var(--qr-control-min-h);padding:0 38px 0 12px;border-radius:12px;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023);appearance:none;-webkit-appearance:none;-moz-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4.2 6.2 8 10l3.8-3.8' stroke='%23939aa8' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:12px 12px}
 .fp-qr-field{display:flex;flex-direction:column;gap:6px}
 .fp-qr-field label{font-size:12px;font-weight:700;color:var(--qr-text-2)}
@@ -1739,7 +1815,11 @@ body {
 @media (max-width:700px){
   .fp-qr-seg-row{grid-template-columns:auto minmax(0,1fr)}
   .fp-qr-seg-ops{justify-content:flex-end;flex-wrap:wrap}
+  .fp-qr-seg-switch{justify-self:end}
   .fp-qr-bar .fp-select{min-width:0}
+  .fp-qr-preset-tools{gap:2px}
+  .fp-qr-preset-head{align-items:stretch}
+  .fp-qr-preset-topbar{grid-template-columns:1fr}
 }
 .fp-modal-title{font-weight:800;font-size:15px;margin-bottom:10px}
 .fp-settings-shell{display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px;flex:1;min-height:0;overflow:hidden}
@@ -1808,18 +1888,16 @@ width:100%}
 .fp-ph-context-value{font-size:13px;font-weight:800;color:var(--qr-text-1);line-height:1.24;word-break:break-word}
 .fp-ph-context-sub{font-size:11px;color:var(--qr-text-2);line-height:1.32;word-break:break-word}
 .fp-ph-context-value.is-placeholder,.fp-ph-context-sub.is-placeholder{color:var(--qr-text-2);font-weight:600}
-.fp-ph-map-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.fp-ph-map-head{display:block;margin-bottom:6px}
 .fp-ph-map-head-main{display:flex;flex-direction:column;gap:5px;min-width:0}
-.fp-ph-map-meta{display:flex;flex-wrap:wrap;gap:6px}
-.fp-ph-map-meta-pill{display:inline-flex;align-items:center;gap:5px;min-height:20px;padding:0 8px;border-radius:999px;border:1px solid color-mix(in srgb,var(--qr-card-border) 82%, var(--qr-accent) 18%);background:color-mix(in srgb,var(--qr-bg-input) 90%, var(--qr-accent) 10%);font-size:10px;font-weight:700;line-height:1;color:var(--qr-text-1)}
-.fp-ph-map-meta-pill.is-soft{color:var(--qr-text-2);background:color-mix(in srgb,var(--qr-bg-input) 94%, transparent)}
+.fp-ph-map-preview-wrap{position:relative;padding-right:34px;min-height:28px}
 .fp-ph-map-preview{display:flex;flex-wrap:wrap;gap:6px}
 .fp-ph-map-chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;min-height:26px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--qr-card-border) 74%, var(--qr-accent) 26%);background:color-mix(in srgb,var(--qr-bg-input) 84%, var(--qr-accent) 16%);font-size:10px;font-weight:700;line-height:1;color:var(--qr-text-1)}
 .fp-ph-map-chip .fp-ph-map-chip-key{flex:0 0 auto;color:var(--qr-text-2);font-weight:800}
 .fp-ph-map-chip .fp-ph-map-chip-sep{flex:0 0 auto;width:4px;height:4px;border-radius:999px;background:color-mix(in srgb,var(--qr-accent) 58%, var(--qr-text-2) 42%);opacity:.9}
 .fp-ph-map-chip .fp-ph-map-chip-val{min-width:0;max-width:124px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fp-ph-map-chip.is-overflow{background:color-mix(in srgb,var(--qr-bg-input) 90%, transparent);border-style:dashed;color:var(--qr-text-2)}
-.fp-ph-map-toggle{display:inline-flex;align-items:center;gap:5px;min-height:26px;padding:0 9px;border:none;border-radius:999px;background:color-mix(in srgb,var(--qr-btn-bg) 88%, var(--qr-accent) 12%);color:var(--qr-text-1);font-size:10px;font-weight:700;line-height:1;cursor:pointer;box-shadow:none}
+.fp-ph-map-toggle{position:absolute;right:0;bottom:0;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;border:none;border-radius:999px;background:color-mix(in srgb,var(--qr-btn-bg) 88%, var(--qr-accent) 12%);color:var(--qr-text-1);cursor:pointer;box-shadow:none}
 .fp-ph-map-toggle:hover{background:color-mix(in srgb,var(--qr-btn-hover-bg) 74%, var(--qr-accent) 26%)}
 .fp-ph-map-toggle .fp-ico{width:12px;height:12px;transition:transform .18s ease}
 .fp-ph-map-toggle[aria-expanded="true"] .fp-ico{transform:rotate(180deg)}
@@ -1833,8 +1911,7 @@ width:100%}
 @media (max-width: 680px){
   .fp-ph-context-grid{grid-template-columns:1fr}
   .fp-ph-context-item.map-overview{grid-column:auto}
-  .fp-ph-map-head{flex-direction:column;align-items:stretch}
-  .fp-ph-map-toggle{align-self:flex-start}
+  .fp-ph-map-preview-wrap{padding-right:32px}
 }
 .fp-row.fp-row-block{align-items:flex-start}
 .fp-row.fp-row-block > label{padding-top:8px}
@@ -3512,11 +3589,13 @@ width:100%}
       link: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6.1 9.9 4.8 11.2a2.1 2.1 0 0 1-3-3L3.1 6.9a2.1 2.1 0 0 1 3 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="m9.9 6.1 1.3-1.3a2.1 2.1 0 0 1 3 3l-1.3 1.3a2.1 2.1 0 0 1-3 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M6.1 9.9h3.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
       wand: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m5 11 6.4-6.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="m10.6 3.3.7-.7M12.7 5.4l.7-.7M12.1 2.7h1.2M13.3 4.9h1.2M2.7 12.1h1.2M3.9 10.9h1.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
       trash: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.8 4.6h8.4M6.2 4.6V3.4h3.6v1.2M5.2 6.2v5.3M8 6.2v5.3M10.8 6.2v5.3" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path d="M4.8 4.6h6.4v7.2a1 1 0 0 1-1 1H5.8a1 1 0 0 1-1-1V4.6Z" stroke="currentColor" stroke-width="1.3"/></svg>',
+      save: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.2 2.8h7.4l2.2 2.2v7.8a1 1 0 0 1-1 1H4.2a1 1 0 0 1-1-1V2.8Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M5.1 2.8v3h4.6v-3M5.3 12h5.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
       sparkles: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.9 9.2 5l3.1 1.2-3.1 1.2L8 10.5 6.8 7.4 3.7 6.2 6.8 5 8 1.9Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="m12.2 9.6.6 1.5 1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6.6-1.5ZM3.2 10.1l.4 1 .9.4-.9.4-.4 1-.4-1-.9-.4.9-.4.4-1Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>',
       undo: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6.2 4.1 3.4 6.8l2.8 2.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 6.8h4.3a3.7 3.7 0 1 1 0 7.4H5.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
       palette: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2.2a5.8 5.8 0 1 0 0 11.6h1.2a1.6 1.6 0 0 0 0-3.2H8.8a1 1 0 0 1 0-2h1.7a3.5 3.5 0 0 0 0-7H8Z" stroke="currentColor" stroke-width="1.4"/><circle cx="4.8" cy="7" r=".8" fill="currentColor"/><circle cx="6.5" cy="5.2" r=".8" fill="currentColor"/><circle cx="9.1" cy="5.1" r=".8" fill="currentColor"/></svg>',
       sliders: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.2h6M11.5 4.2H13M3 8h2.5M7 8H13M3 11.8h7M11.5 11.8H13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="10.2" cy="4.2" r="1.1" stroke="currentColor" stroke-width="1.3"/><circle cx="5.8" cy="8" r="1.1" stroke="currentColor" stroke-width="1.3"/><circle cx="10.2" cy="11.8" r="1.1" stroke="currentColor" stroke-width="1.3"/></svg>',
       pencil: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m10.9 2.2 2.9 2.9-7.6 7.6-3.2.3.3-3.2 7.6-7.6Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="m9.8 3.3 2.9 2.9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+      copy: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.1" y="3.1" width="7.2" height="8.4" rx="1.4" stroke="currentColor" stroke-width="1.3"/><path d="M3.7 5.3V11a1.3 1.3 0 0 0 1.3 1.3h4.9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
       swap: '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 5.2h8.4M9.2 3.6l2.2 1.6-2.2 1.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 10.8H4.6M6.8 9.2l-2.2 1.6 2.2 1.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
       'more-v': '<svg class="fp-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3.5" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="12.5" r="1.3" fill="currentColor"/></svg>',
     };
@@ -5076,13 +5155,13 @@ width:100%}
                             <div class="fp-ph-context-value" data-ph-current-map></div>
                             <div class="fp-ph-context-sub" data-ph-current-map-sub></div>
                           </div>
-                          <button type="button" class="fp-ph-map-toggle" data-ph-map-toggle aria-expanded="false">
-                            <span data-ph-map-toggle-label>变量概览</span>
+                        </div>
+                        <div class="fp-ph-map-preview-wrap">
+                          <div class="fp-ph-map-preview" data-ph-map-preview></div>
+                          <button type="button" class="fp-ph-map-toggle" data-ph-map-toggle aria-expanded="false" title="展开映射预览">
                             ${iconSvg('chevron-down')}
                           </button>
                         </div>
-                        <div class="fp-ph-map-meta" data-ph-map-meta></div>
-                        <div class="fp-ph-map-preview" data-ph-map-preview></div>
                         <div class="fp-ph-map-detail" data-ph-map-detail>
                           <div class="fp-ph-map-detail-grid" data-ph-map-detail-grid></div>
                         </div>
@@ -5209,14 +5288,24 @@ width:100%}
               </div>
             </div>
             <div class="fp-tab" data-tab="qr-llm-presets">
-              <div class="fp-qr-note">用于扩写执行内容草稿的 Prompt 预设（可导入/导出共享）</div>
               <div class="fp-qr-preset-workbench">
                 <div class="fp-qr-section">
-                  <div class="fp-qr-bar">
+                  <div class="fp-qr-preset-head">
+                    <div class="fp-qr-note">用于扩写执行内容草稿的 Prompt 预设（可导入/导出共享）</div>
+                    <div class="fp-qr-preset-tools is-file" aria-label="预设文件操作">
+                      <button class="fp-btn fp-qr-preset-action icon-only" data-qr-preset-save title="保存/覆盖" aria-label="保存/覆盖">${iconSvg('save')}</button>
+                      <button class="fp-btn fp-qr-preset-action icon-only" data-qr-preset-import title="导入预设" aria-label="导入预设">${iconSvg('upload')}</button>
+                      <button class="fp-btn fp-qr-preset-action icon-only" data-qr-preset-export title="导出预设" aria-label="导出预设">${iconSvg('download')}</button>
+                    </div>
+                  </div>
+                  <div class="fp-qr-bar fp-qr-preset-topbar">
                     <select data-qr-preset-select class="fp-select"></select>
-                    <button class="fp-btn fp-qr-preset-action" data-qr-preset-new>新增</button>
-                    <button class="fp-btn fp-qr-preset-action" data-qr-preset-delete>删除</button>
-                    <button class="fp-btn fp-qr-preset-action" data-qr-preset-reset-default>重置</button>
+                    <div class="fp-qr-preset-tools" aria-label="预设操作">
+                      <button class="fp-btn fp-qr-preset-action icon-only" data-qr-preset-new title="新增预设" aria-label="新增预设">${iconSvg('add')}</button>
+                      <button class="fp-btn fp-qr-preset-action icon-only" data-qr-preset-rename title="重命名预设" aria-label="重命名预设">${iconSvg('pencil')}</button>
+                      <button class="fp-btn fp-qr-preset-action icon-only" data-qr-preset-delete title="删除预设" aria-label="删除预设">${iconSvg('trash')}</button>
+                      <button class="fp-btn fp-qr-preset-action icon-only" data-qr-preset-reset-default title="重置默认预设" aria-label="重置默认预设">${iconSvg('undo')}</button>
+                    </div>
                   </div>
                 </div>
 
@@ -5229,12 +5318,6 @@ width:100%}
                       </div>
                     </div>
                   <div data-qr-prompt-group-list class="fp-qr-seg-list"></div>
-                </div>
-
-                <div class="fp-qr-inline-actions">
-                  <button class="fp-btn" data-qr-preset-save>保存/覆盖</button>
-                  <button class="fp-btn" data-qr-preset-export>导出预设</button>
-                  <button class="fp-btn" data-qr-preset-import>导入预设</button>
                 </div>
               </div>
             </div>
@@ -5267,6 +5350,7 @@ width:100%}
       const qrTestConnectBtn = card.querySelector('[data-qr-test-connect]') as HTMLElement | null;
       const qrPresetSelectEl = card.querySelector('[data-qr-preset-select]') as HTMLSelectElement | null;
       const qrPresetNewBtn = card.querySelector('[data-qr-preset-new]') as HTMLElement | null;
+      const qrPresetRenameBtn = card.querySelector('[data-qr-preset-rename]') as HTMLElement | null;
       const qrPresetDeleteBtn = card.querySelector('[data-qr-preset-delete]') as HTMLElement | null;
       const qrPresetResetDefaultBtn = card.querySelector('[data-qr-preset-reset-default]') as HTMLElement | null;
       const qrPresetSaveBtn = card.querySelector('[data-qr-preset-save]') as HTMLElement | null;
@@ -5306,7 +5390,31 @@ width:100%}
       const normalizeImportedPreset = (raw: unknown, fallbackName = ''): { name: string; preset: QrLlmPreset } | null => {
         if (!raw || typeof raw !== 'object') return null;
         const obj = raw as Record<string, unknown>;
-        const name = String(obj.name || fallbackName || '').trim();
+        const stPresetObj = (
+          obj.sillytavern_prompt_preset && typeof obj.sillytavern_prompt_preset === 'object'
+            ? obj.sillytavern_prompt_preset as Record<string, unknown>
+            : null
+        );
+        const firstNonEmpty = (...values: unknown[]): string => {
+          for (const value of values) {
+            const text = String(value ?? '').trim();
+            if (text) return text;
+          }
+          return '';
+        };
+        const name = firstNonEmpty(
+          obj.name,
+          obj.presetName,
+          obj.preset_name,
+          obj.title,
+          obj.preset,
+          obj.preset_title,
+          stPresetObj?.name,
+          stPresetObj?.presetName,
+          stPresetObj?.preset_name,
+          stPresetObj?.title,
+          fallbackName,
+        );
         let systemPrompt = String(obj.systemPrompt || '').trim();
         let userPromptTemplate = String(obj.userPromptTemplate || '').trim();
         let promptGroup = normalizePromptGroup(obj.promptGroup);
@@ -5414,8 +5522,11 @@ width:100%}
           });
         };
 
-        if (!promptGroup.length && Array.isArray(obj.prompts)) {
-          promptGroup = expandStVars(obj.prompts as Array<{
+        const stPrompts = Array.isArray(obj.prompts)
+          ? obj.prompts
+          : (Array.isArray(stPresetObj?.prompts) ? stPresetObj.prompts : null);
+        if (!promptGroup.length && Array.isArray(stPrompts)) {
+          promptGroup = expandStVars(stPrompts as Array<{
             identifier?: string;
             name?: string;
             enabled?: boolean;
@@ -5497,7 +5608,7 @@ width:100%}
         const roleText = (role: 'SYSTEM' | 'USER' | 'ASSISTANT') => role === 'SYSTEM' ? '系统段' : (role === 'USER' ? '用户段' : 'AI助手段');
         localPromptGroupDraft.forEach((seg, idx) => {
           const row = pD.createElement('div');
-          row.className = 'fp-qr-seg-row';
+          row.className = `fp-qr-seg-row ${seg.enabled === false ? 'is-disabled' : ''}`;
           row.setAttribute('data-qr-seg-row', String(idx));
           row.innerHTML = `
             <button class="fp-qr-drag-handle" data-qr-seg-drag-handle="${idx}" title="拖拽排序" aria-label="拖拽排序">
@@ -5512,11 +5623,12 @@ width:100%}
             </div>
             <div class="fp-qr-seg-ops">
               <button class="fp-btn icon-only" data-qr-seg-edit="${idx}" title="编辑">${iconSvg('pencil')}</button>
-              <button class="fp-btn icon-only" data-qr-seg-add-after="${idx}" title="新增">${iconSvg('add')}</button>
+              <button class="fp-btn icon-only" data-qr-seg-add-after="${idx}" title="复制">${iconSvg('copy')}</button>
               <button class="fp-btn icon-only" data-qr-seg-up="${idx}" title="上移">${iconSvg('chevron-up')}</button>
               <button class="fp-btn icon-only" data-qr-seg-down="${idx}" title="下移">${iconSvg('chevron-down')}</button>
               <button class="fp-btn icon-only" data-qr-seg-del="${idx}" title="删除" style="color:#c44">${iconSvg('trash')}</button>
             </div>
+            <button class="fp-qr-seg-switch ${seg.enabled !== false ? 'is-on' : ''}" data-qr-seg-toggle="${idx}" title="${seg.enabled !== false ? '已启用，点击禁用' : '已禁用，点击启用'}" aria-pressed="${seg.enabled !== false ? 'true' : 'false'}"></button>
           `;
           qrPromptGroupListEl.appendChild(row);
         });
@@ -5753,19 +5865,6 @@ width:100%}
         if (!preset) return;
         const normalizedPreset = compileQrLlmPreset(preset);
         localPromptGroupDraft = normalizePromptGroup(normalizedPreset.promptGroup);
-        if (String(normalizedPreset.finalSystemDirective || '').trim() && !localPromptGroupDraft.some((x) => String(x.name || '').includes('Final'))) {
-          localPromptGroupDraft.push({
-            id: uid('qrp'),
-            role: 'SYSTEM',
-            name: 'Final指令',
-            note: 'Final指令',
-            position: 'RELATIVE',
-            enabled: true,
-            injectionDepth: 4,
-            injectionOrder: 100,
-            content: String(normalizedPreset.finalSystemDirective || ''),
-          });
-        }
         if (!localPromptGroupDraft.length) {
           const defPreset = buildDefaultQrLlmPresetStore().presets[DEFAULT_QR_LLM_PRESET_NAME];
           localPromptGroupDraft = normalizePromptGroup(defPreset.promptGroup);
@@ -6064,17 +6163,19 @@ seed: -1`;
           }
           const addIdx = getSegIndex(btn, 'data-qr-seg-add-after');
           if (addIdx >= 0) {
-            const role = localPromptGroupDraft[addIdx]?.role || 'USER';
-            localPromptGroupDraft.splice(addIdx + 1, 0, {
-              id: uid('qrp'),
-              role,
-              name: role === 'SYSTEM' ? '系统段' : '新条目',
-              note: role === 'SYSTEM' ? '系统段' : '新条目',
-              position: 'RELATIVE',
+            const source = deepClone(localPromptGroupDraft[addIdx] || {
+              role: 'USER' as const,
+              name: '新条目',
+              note: '新条目',
+              position: 'RELATIVE' as const,
               enabled: true,
               injectionDepth: 4,
               injectionOrder: 100,
               content: '',
+            });
+            localPromptGroupDraft.splice(addIdx + 1, 0, {
+              ...source,
+              id: uid('qrp'),
             });
             renderPromptGroupEditor();
             openPromptSegmentModal(addIdx + 1);
@@ -6100,6 +6201,13 @@ seed: -1`;
               renderPromptGroupEditor();
               compileDraftToFields();
             }
+            return;
+          }
+          const toggleIdx = getSegIndex(btn, 'data-qr-seg-toggle');
+          if (toggleIdx >= 0) {
+            localPromptGroupDraft[toggleIdx].enabled = localPromptGroupDraft[toggleIdx].enabled === false;
+            renderPromptGroupEditor();
+            compileDraftToFields();
             return;
           }
           const delIdx = getSegIndex(btn, 'data-qr-seg-del');
@@ -6156,6 +6264,44 @@ seed: -1`;
           toast(`已创建预设：${name}`);
         };
       }
+      if (qrPresetRenameBtn) {
+        qrPresetRenameBtn.onclick = () => {
+          const selected = String(qrPresetSelectEl?.value || localQrLlmSettings.activePresetName || '').trim();
+          if (!selected) {
+            toast('请先选择预设');
+            return;
+          }
+          if (selected === DEFAULT_QR_LLM_PRESET_NAME) {
+            toast('默认预设不可重命名');
+            return;
+          }
+          const draftName = prompt('输入新的预设名称', selected);
+          const nextName = String(draftName || '').trim();
+          if (!nextName || nextName === selected) return;
+          if (nextName === DEFAULT_QR_LLM_PRESET_NAME) {
+            toast('该名称已被默认预设占用');
+            return;
+          }
+          if (localQrLlmPresetStore.presets[nextName]) {
+            toast('同名预设已存在');
+            return;
+          }
+          const preset = localQrLlmPresetStore.presets[selected];
+          if (!preset) {
+            toast('当前预设不存在');
+            return;
+          }
+          localQrLlmPresetStore.presets[nextName] = compileQrLlmPreset({
+            ...deepClone(preset),
+            updatedAt: nowIso(),
+          });
+          delete localQrLlmPresetStore.presets[selected];
+          localQrLlmSettings.activePresetName = nextName;
+          renderQrPresetSelect(nextName);
+          persistLocalQrLlmPresetChanges();
+          toast(`预设已重命名：${selected} → ${nextName}`);
+        };
+      }
       if (qrPresetDeleteBtn) {
         qrPresetDeleteBtn.onclick = () => {
           const selected = String(qrPresetSelectEl?.value || localQrLlmSettings.activePresetName || '').trim();
@@ -6183,7 +6329,9 @@ seed: -1`;
             return;
           }
           if (!confirm('确认重置“默认预设”？此操作会覆盖当前默认预设内容。')) return;
-          const def = buildDefaultQrLlmPresetStore().presets[DEFAULT_QR_LLM_PRESET_NAME];
+          const defaultStore = buildDefaultQrLlmPresetStore();
+          const def = defaultStore.presets[DEFAULT_QR_LLM_PRESET_NAME];
+          localQrLlmPresetStore.defaultPresetVersion = defaultStore.defaultPresetVersion;
           localQrLlmPresetStore.presets[DEFAULT_QR_LLM_PRESET_NAME] = deepClone(def);
           localQrLlmSettings.activePresetName = DEFAULT_QR_LLM_PRESET_NAME;
           renderQrPresetSelect(DEFAULT_QR_LLM_PRESET_NAME);
@@ -6266,6 +6414,7 @@ seed: -1`;
             const file = input.files?.[0];
             if (!file) return;
             try {
+              const fileBaseName = String(file.name || '').replace(/\.[^.]+$/, '').trim();
               const text = await file.text();
               const parsed = JSON.parse(text);
               const imported: Array<{ name: string; preset: QrLlmPreset }> = [];
@@ -6277,11 +6426,11 @@ seed: -1`;
                 });
               } else if (Array.isArray(parsed)) {
                 parsed.forEach((raw, idx) => {
-                  const hit = normalizeImportedPreset(raw, `导入预设_${idx + 1}`);
+                  const hit = normalizeImportedPreset(raw, fileBaseName || `导入预设_${idx + 1}`);
                   if (hit) imported.push(hit);
                 });
               } else {
-                const hit = normalizeImportedPreset(parsed, `导入预设_${Date.now()}`);
+                const hit = normalizeImportedPreset(parsed, fileBaseName || `导入预设_${Date.now()}`);
                 if (hit) imported.push(hit);
               }
               if (!imported.length) {
@@ -6352,12 +6501,10 @@ seed: -1`;
       const currentEditTargetSubEl = card.querySelector('[data-ph-current-edit-target-sub]') as HTMLElement | null;
       const currentMapEl = card.querySelector('[data-ph-current-map]') as HTMLElement | null;
       const currentMapSubEl = card.querySelector('[data-ph-current-map-sub]') as HTMLElement | null;
-      const currentMapMetaEl = card.querySelector('[data-ph-map-meta]') as HTMLElement | null;
       const currentMapPreviewEl = card.querySelector('[data-ph-map-preview]') as HTMLElement | null;
       const currentMapDetailEl = card.querySelector('[data-ph-map-detail]') as HTMLElement | null;
       const currentMapDetailGridEl = card.querySelector('[data-ph-map-detail-grid]') as HTMLElement | null;
       const currentMapToggleBtn = card.querySelector('[data-ph-map-toggle]') as HTMLButtonElement | null;
-      const currentMapToggleLabelEl = card.querySelector('[data-ph-map-toggle-label]') as HTMLElement | null;
       const roleSelectorEl = card.querySelector('[data-ph-role-selector]') as HTMLSelectElement | null;
       const fixedListEl = card.querySelector('[data-fixed-ph-list]') as HTMLElement | null;
       const customListEl = card.querySelector('[data-custom-ph-list]') as HTMLElement | null;
@@ -6417,8 +6564,54 @@ seed: -1`;
       };
       let mapOverviewExpanded = false;
 
-      const buildMapMetaPill = (text: string, soft = false) => {
-        return `<span class="fp-ph-map-meta-pill${soft ? ' is-soft' : ''}">${escapeHtml(text)}</span>`;
+      const measureMapChipWidth = (key: string, value: string, overflowText?: string) => {
+        const measureHost = pD.createElement('div');
+        measureHost.style.position = 'fixed';
+        measureHost.style.left = '-99999px';
+        measureHost.style.top = '0';
+        measureHost.style.visibility = 'hidden';
+        measureHost.style.pointerEvents = 'none';
+        measureHost.style.whiteSpace = 'nowrap';
+        const chip = pD.createElement('span');
+        chip.className = `fp-ph-map-chip${overflowText ? ' is-overflow' : ''}`;
+        if (overflowText) {
+          chip.textContent = overflowText;
+        } else {
+          chip.innerHTML = `<span class="fp-ph-map-chip-key">${escapeHtml(key)}</span><span class="fp-ph-map-chip-sep"></span><span class="fp-ph-map-chip-val">${escapeHtml(value)}</span>`;
+        }
+        measureHost.appendChild(chip);
+        (pD.body || pD.documentElement).appendChild(measureHost);
+        const width = Math.ceil(chip.getBoundingClientRect().width);
+        measureHost.remove();
+        return width;
+      };
+
+      const getAdaptiveMapPreviewCount = (pairs: Array<{ key: string; value: string }>) => {
+        const hostWidth = Math.max(currentMapPreviewEl?.clientWidth || 0, currentMapPreviewEl?.parentElement?.clientWidth || 0, 280);
+        const gap = 6;
+        const overflowChipWidth = measureMapChipWidth('', '', '+99');
+        const maxRows = 2;
+        let used = 0;
+        let row = 1;
+        let count = 0;
+        for (let i = 0; i < pairs.length; i += 1) {
+          const remainingAfterThis = pairs.length - (i + 1);
+          const chipWidth = measureMapChipWidth(pairs[i].key, pairs[i].value);
+          const chipGap = used > 0 ? gap : 0;
+          const reservedOverflow = remainingAfterThis > 0
+            ? (used > 0 ? gap : 0) + overflowChipWidth
+            : 0;
+          if (used + chipGap + chipWidth + reservedOverflow <= hostWidth) {
+            used += chipGap + chipWidth;
+            count += 1;
+            continue;
+          }
+          if (row >= maxRows) break;
+          row += 1;
+          used = chipWidth;
+          count += 1;
+        }
+        return Math.max(1, count);
       };
 
       const renderCurrentMapOverview = (activeMapRoleId: string, selectedValues: Record<string, string>) => {
@@ -6428,16 +6621,9 @@ seed: -1`;
           key,
           value: String(selectedValues[key] || placeholders[key] || key),
         }));
-        if (currentMapMetaEl) {
-          const meta = [
-            buildMapMetaPill(activeMapRoleId === ROLE_DEFAULT_OPTION ? '默认映射' : '角色映射'),
-            buildMapMetaPill(`${pairs.length} 个变量`, true),
-          ];
-          if (selectedRoleOption === activeMapRoleId) meta.push(buildMapMetaPill('编辑中'));
-          currentMapMetaEl.innerHTML = meta.join('');
-        }
         if (currentMapPreviewEl) {
-          const summaryPairs = pairs.slice(0, 3);
+          const previewCount = getAdaptiveMapPreviewCount(pairs);
+          const summaryPairs = pairs.slice(0, previewCount);
           const overflowCount = Math.max(0, pairs.length - summaryPairs.length);
           currentMapPreviewEl.innerHTML = [
             ...summaryPairs.map((pair) => `
@@ -6463,10 +6649,12 @@ seed: -1`;
         }
         if (currentMapDetailEl) currentMapDetailEl.classList.toggle('is-open', mapOverviewExpanded);
         if (currentMapToggleBtn) {
-          currentMapToggleBtn.hidden = pairs.length <= 3;
+          const isTruncated = pairs.length > getAdaptiveMapPreviewCount(pairs);
+          currentMapToggleBtn.hidden = !isTruncated;
           currentMapToggleBtn.setAttribute('aria-expanded', mapOverviewExpanded ? 'true' : 'false');
-          if (currentMapToggleLabelEl) currentMapToggleLabelEl.textContent = mapOverviewExpanded ? '收起' : '展开';
-          currentMapToggleBtn.title = activeMapRoleId === ROLE_DEFAULT_OPTION ? '查看默认映射概览' : '查看当前角色映射概览';
+          currentMapToggleBtn.title = mapOverviewExpanded
+            ? '收起映射预览'
+            : (activeMapRoleId === ROLE_DEFAULT_OPTION ? '展开默认映射预览' : '展开当前角色映射预览');
         }
       };
 
