@@ -16,7 +16,7 @@ CLAUDE.md
    - 错误：`"content": "import 'http://localhost:5500/dist/快速回复管理器/index.js'"`
 
 ### 启动流程
-1. `pnpm watch`（首次需先 `pnpm install`）
+1. `cmd /c pnpm watch`（首次需先 `pnpm install`）
 2. VSCode 点击右下角「Go Live」启动 Live Server（端口 5500）
 3. 酒馆助手 → 脚本库 → 导入实时修改脚本配置 JSON
 4. 酒馆助手 → 开发 → 实时监听 → 允许监听

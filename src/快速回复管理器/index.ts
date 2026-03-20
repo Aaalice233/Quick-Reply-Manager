@@ -594,9 +594,9 @@
               injectionDepth: 4,
               injectionOrder: 100,
               content: [
-                '你是“快速回复执行内容扩写助手”。',
-                '任务：将用户给出的简要草稿扩写为可直接执行的完整执行内容。',
-                '必须保持草稿原意，不擅自改写目标。',
+                '你是“快速回复执行内容润写助手”。',
+                '把用户给出的简短草稿润成可直接使用的一小段自然中文。',
+                '必须保持草稿原意，不擅自改目标，不偷换人物关系。',
               ].join('\n'),
             },
             {
@@ -609,7 +609,9 @@
               injectionOrder: 100,
               content: [
                 '只输出最终可执行正文。',
+                '默认写成 1 段自然语言，不列提纲、不编号、不分条。',
                 '不要输出解释、注释、前言、后记、分析过程。',
+                '不要写“执行要求如下”“当前场景聚焦于”这类模板腔。',
                 '不要输出 Markdown 代码块围栏。',
               ].join('\n'),
             },
@@ -624,6 +626,9 @@
               content: [
                 '【草稿】',
                 '{{draft}}',
+                '',
+                '【草稿中已出现的占位符原文】',
+                '{{draft_placeholder_tokens}}',
                 '',
                 '【可用占位符】',
                 '{{placeholder_list}}',
@@ -641,7 +646,8 @@
               injectionDepth: 4,
               injectionOrder: 100,
               content: [
-                '如果占位符在映射中有值，优先使用映射值理解语义。',
+                '草稿里已经出现的占位符，必须原样保留并沿用，不要改写成别的格式。',
+                '如果占位符在映射中有值，可以用来理解语义，但输出时优先复用草稿里的原占位符文本。',
                 '未映射的占位符保持原样，不要删除、不硬编码。',
                 '不要新增未提供的新占位符键名。',
                 '保持占位符结构可替换性，不破坏现有占位符语法。',
@@ -656,9 +662,9 @@
               injectionDepth: 4,
               injectionOrder: 100,
               content: [
-                '补充必要的动作、场景、对象、约束和结果，使文本可以直接执行。',
-                '在不改变目标的前提下提升清晰度与可执行性。',
-                '避免空泛套话，避免与草稿无关的新增设定。',
+                '优先补足最必要的信息，让句子顺、清楚、能直接用。',
+                '除非草稿本身信息很多，否则控制在 1 到 3 句，不要明显扩太长。',
+                '避免空泛套话，避免与草稿无关的新增设定，避免过度戏剧化和过强结构感。',
               ].join('\n'),
             },
           ],
@@ -1566,7 +1572,10 @@ body {
 .fp-tree-node{display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:10px;cursor:pointer;font-size:13px;color:var(--qr-tree-text);transition:background .15s ease,color .15s ease}
 .fp-tree-node:hover{background:var(--qr-bg-hover)}
 .fp-tree-node.active{background:var(--qr-tree-active-bg);color:var(--qr-tree-active-text)}
-.fp-tree-node.drop-target{outline:1px dashed var(--qr-accent);outline-offset:-1px}
+.fp-tree-node.drop-target{outline:1px dashed color-mix(in srgb,var(--qr-accent) 48%, transparent);outline-offset:-1px}
+.fp-tree-node.drop-before{box-shadow:inset 0 2px 0 var(--qr-accent)}
+.fp-tree-node.drop-after{box-shadow:inset 0 -2px 0 var(--qr-accent)}
+.fp-tree-node.drop-inside{background:color-mix(in srgb,var(--qr-tree-active-bg) 72%, var(--qr-accent) 28%)}
 .fp-tree-node.is-pointer-dragging{opacity:1;filter:none}
 .fp-tree-indent{display:inline-block;width:12px;flex:none}
 .fp-main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--qr-main-bg)}
@@ -1579,6 +1588,9 @@ body {
 .fp-card.fp-card-add:hover{color:var(--qr-accent);background:color-mix(in srgb,var(--qr-card-bg,var(--qr-bg-3,#fff)) 72%, var(--qr-accent) 28%)}
 .fp-card.fp-card-add .fp-ico{width:22px;height:22px}
 .fp-card.is-pointer-dragging{opacity:1;filter:none}
+.fp-card.fp-card-placeholder{border-style:dashed;border-color:color-mix(in srgb,var(--qr-accent) 22%, var(--qr-card-border) 78%);background:color-mix(in srgb,var(--qr-card-bg,var(--qr-bg-3,#fff)) 88%, var(--qr-accent) 12%);opacity:.72;pointer-events:none}
+.fp-card.drop-before{box-shadow:inset 0 3px 0 color-mix(in srgb,var(--qr-accent) 78%, #fff 22%),0 1px 0 rgba(255,255,255,.03),0 2px 14px var(--qr-card-shadow)}
+.fp-card.drop-after{box-shadow:inset 0 -3px 0 color-mix(in srgb,var(--qr-accent) 78%, #fff 22%),0 1px 0 rgba(255,255,255,.03),0 2px 14px var(--qr-card-shadow)}
 .fp-card-title{font-size:13px;font-weight:700;line-height:1.35;word-break:break-word;padding-right:54px;color:inherit}
 .fp-card-icons{position:absolute;right:8px;top:8px;display:flex;gap:6px}
 .fp-mini{font-size:11px;padding:2px 6px;border-radius:99px;background:var(--qr-tag-bg);border:1px solid var(--qr-tag-border);color:var(--qr-tag-text);white-space:nowrap}
@@ -1631,8 +1643,15 @@ body {
 .fp-edit-item-card{width:min(560px,92vw);min-height:min(70vh,700px);max-height:min(82vh,760px)}
 .fp-edit-scroll{flex:1;min-height:0;overflow-y:auto;padding-right:4px;scrollbar-gutter:stable}
 .fp-edit-item-card [data-content]{min-height:250px;height:250px}
-.fp-content-editor{position:relative;flex:1;min-width:0}
-.fp-content-editor [data-content]{padding-bottom:40px}
+.fp-content-editor{position:relative;flex:1;min-width:0;--fp-editor-sheen-opacity:0;--fp-editor-sheen-accent:18%;--fp-editor-sheen-speed:1.7s}
+.fp-content-editor [data-content]{padding-bottom:40px;transition:box-shadow .22s ease,border-color .22s ease,filter .22s ease}
+.fp-content-editor.is-generating [data-content]{box-shadow:0 0 0 1px color-mix(in srgb,var(--qr-accent) 20%, transparent),0 14px 30px rgba(0,0,0,.08)}
+.fp-content-editor.is-generating::before,.fp-content-editor.is-generating::after{content:"";position:absolute;inset:1px;border-radius:calc(var(--qr-control-radius) - 1px);pointer-events:none}
+.fp-content-editor.is-generating::before{background:linear-gradient(180deg,rgba(255,255,255,.018),rgba(255,255,255,.006));opacity:var(--fp-editor-sheen-opacity);transition:opacity .24s ease}
+.fp-content-editor.is-generating::after{background:linear-gradient(112deg,transparent 8%,rgba(255,255,255,.012) 26%,color-mix(in srgb,var(--qr-accent) var(--fp-editor-sheen-accent), transparent) 44%,rgba(255,255,255,.028) 54%,transparent 76%);background-size:220% 100%;opacity:var(--fp-editor-sheen-opacity);animation:fp-editor-shimmer var(--fp-editor-sheen-speed) linear infinite;transition:opacity .24s ease,background .24s ease}
+.fp-content-editor.is-generate-awaiting{--fp-editor-sheen-opacity:.92;--fp-editor-sheen-accent:18%;--fp-editor-sheen-speed:1.7s}
+.fp-content-editor.is-generate-writing{--fp-editor-sheen-opacity:.62;--fp-editor-sheen-accent:10%;--fp-editor-sheen-speed:2.2s}
+.fp-content-editor [data-content].is-generate-readonly{caret-color:transparent}
 .fp-qr-gen-btn{position:absolute;right:10px;bottom:10px;z-index:2;border:none;background:transparent;box-shadow:none;padding:0;min-height:auto;line-height:1;color:var(--qr-accent);cursor:pointer;transition:transform .16s ease,filter .16s ease,opacity .16s ease}
 .fp-qr-gen-btn .fp-ico{width:20px;height:20px;display:block}
 .fp-qr-gen-btn:hover{transform:translateY(-1px) scale(1.08);filter:drop-shadow(0 0 7px color-mix(in srgb,var(--qr-accent) 70%, transparent))}
@@ -1653,17 +1672,30 @@ body {
 .fp-qr-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
 .fp-qr-card-title{font-size:12px;font-weight:800;color:var(--qr-text-1)}
 .fp-qr-seg-list{display:flex;flex-direction:column;gap:6px}
-.fp-qr-seg-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 10px;border:1px solid var(--qr-border-2);border-radius:10px;background:var(--qr-bg-input)}
+.fp-qr-seg-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--qr-border-2);border-radius:10px;background:var(--qr-bg-input)}
+.fp-qr-seg-row.is-dragging{display:none}
 .fp-qr-seg-main{min-width:0;display:flex;align-items:center}
 .fp-qr-seg-note{font-size:13px;font-weight:700;color:var(--qr-text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fp-qr-seg-ops{display:flex;gap:6px;align-items:center}
 .fp-qr-seg-ops .fp-btn{padding:0;min-height:28px;min-width:28px;width:28px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center}
 .fp-qr-seg-ops .fp-btn .fp-ico{margin-right:0;width:13px;height:13px}
-.fp-qr-drag-handle{cursor:grab}
-.fp-qr-drag-handle:active{cursor:grabbing}
-.fp-debug-console{width:100%;min-height:220px;background:#07090d!important;color:#8dfc9b!important;border:1px solid #1c232e!important;border-radius:12px!important;padding:12px!important;font:12px/1.55 "Cascadia Mono","Consolas","Courier New",monospace;white-space:pre-wrap;word-break:break-word;overflow:auto;box-shadow:inset 0 0 0 1px rgba(255,255,255,.02)}
+.fp-qr-drag-handle{width:22px;min-width:22px;height:28px;padding:0;border:none;background:transparent;box-shadow:none;display:inline-flex;align-items:center;justify-content:center;cursor:grab;color:var(--qr-text-2);opacity:.8;transition:opacity .15s ease,transform .12s ease,color .15s ease}
+.fp-qr-drag-handle:hover{opacity:1;color:var(--qr-text-1)}
+.fp-qr-drag-handle:active{cursor:grabbing;transform:scale(.96)}
+.fp-qr-drag-handle-dots{width:9px;height:15px;display:grid;grid-template-columns:repeat(2,3px);grid-template-rows:repeat(3,3px);gap:3px}
+.fp-qr-drag-handle-dots span{width:3px;height:3px;border-radius:999px;background:currentColor;display:block}
+.fp-qr-seg-placeholder{border-style:dashed;border-color:color-mix(in srgb,var(--qr-accent) 24%, var(--qr-border-2) 76%);background:color-mix(in srgb,var(--qr-bg-input) 88%, var(--qr-accent) 12%);opacity:.72;pointer-events:none}
+.fp-qr-seg-placeholder .fp-qr-seg-ops{opacity:.38}
+.fp-qr-seg-placeholder .fp-qr-drag-handle{opacity:.42}
+.fp-drag-ghost.fp-qr-seg-row{opacity:.92;border-color:color-mix(in srgb,var(--qr-accent) 22%, var(--qr-border-2) 78%);background:color-mix(in srgb,var(--qr-bg-input) 92%, #fff 8%)}
+.fp-debug-console{width:100%;min-height:220px;background:#07090d!important;color:#8dfc9b!important;border:1px solid #1c232e!important;border-radius:12px!important;padding:12px!important;font:12px/1.55 "Cascadia Mono","Consolas","Courier New",monospace;white-space:pre-wrap;word-break:break-word;overflow:auto;box-shadow:inset 0 0 0 1px rgba(255,255,255,.02);scrollbar-width:thin;scrollbar-color:rgba(141,252,155,.55) rgba(9,14,20,.9)}
 .fp-debug-console::selection{background:rgba(141,252,155,.25);color:#eaffee}
 .fp-debug-console{user-select:text;cursor:text}
+.fp-debug-console::-webkit-scrollbar{width:10px;height:10px}
+.fp-debug-console::-webkit-scrollbar-track{background:rgba(9,14,20,.9);border-left:1px solid rgba(141,252,155,.14);border-radius:10px}
+.fp-debug-console::-webkit-scrollbar-thumb{background:rgba(141,252,155,.52);border-radius:999px;border:2px solid rgba(9,14,20,.9);background-clip:padding-box}
+.fp-debug-console::-webkit-scrollbar-thumb:hover{background:rgba(141,252,155,.7)}
+.fp-debug-console::-webkit-scrollbar-corner{background:rgba(9,14,20,.9)}
 .fp-preview-ta{padding:12px 14px!important;border-radius:12px!important;border:1px solid color-mix(in srgb,var(--qr-btn-border) 82%, #fff 18%)!important;background:color-mix(in srgb,var(--qr-bg-input) 86%, #fff 14%)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.35), inset 0 -1px 0 rgba(0,0,0,.04);line-height:1.55;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--qr-accent) 42%, #9aa4b2 58%) transparent}
 .fp-preview-ta::-webkit-scrollbar{width:10px;height:10px}
 .fp-preview-ta::-webkit-scrollbar-track{background:transparent;border-left:1px solid color-mix(in srgb,var(--qr-border-2) 76%, transparent 24%)}
@@ -1672,8 +1704,13 @@ body {
 .fp-seg-edit-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;margin-bottom:8px}
 .fp-seg-edit-grid .fp-row{margin-bottom:0}
 .fp-seg-edit-grid .fp-row>label{width:52px}
+.fp-seg-edit-row{display:grid;grid-template-columns:52px minmax(0,1fr);gap:12px;align-items:start}
+.fp-seg-edit-row > label{width:auto;padding-top:8px}
+.fp-seg-edit-row > .fp-textarea{width:100%}
 @media (max-width:760px){
   .fp-seg-edit-grid{grid-template-columns:1fr}
+  .fp-seg-edit-row{grid-template-columns:1fr}
+  .fp-seg-edit-row > label{padding-top:0}
 }
 .fp-qr-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 .fp-qr-toolbar .fp-btn{min-height:32px}
@@ -1682,10 +1719,10 @@ body {
 .fp-qr-param-item{display:flex;flex-direction:column;gap:4px}
 .fp-qr-param-item label{font-size:12px;color:var(--qr-text-2)}
 .fp-qr-preset-workbench{display:flex;flex-direction:column;gap:10px}
-.fp-qr-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.fp-qr-bar .fp-btn{min-height:32px}
-.fp-qr-bar .fp-select{flex:1;min-width:180px}
-.fp-qr-bar .fp-select{padding:10px 38px 10px 12px;border-radius:12px;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023);appearance:none;-webkit-appearance:none;-moz-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4.2 6.2 8 10l3.8-3.8' stroke='%23939aa8' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:12px 12px}
+.fp-qr-bar{display:flex;gap:8px;align-items:stretch;flex-wrap:nowrap}
+.fp-qr-bar .fp-btn{min-height:var(--qr-control-min-h);height:var(--qr-control-min-h)}
+.fp-qr-preset-action{min-width:64px;padding:0 14px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+.fp-qr-bar .fp-select{flex:1;min-width:180px;height:var(--qr-control-min-h);min-height:var(--qr-control-min-h);padding:0 38px 0 12px;border-radius:12px;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023);appearance:none;-webkit-appearance:none;-moz-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4.2 6.2 8 10l3.8-3.8' stroke='%23939aa8' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:12px 12px}
 .fp-qr-field{display:flex;flex-direction:column;gap:6px}
 .fp-qr-field label{font-size:12px;font-weight:700;color:var(--qr-text-2)}
 .fp-qr-field input,.fp-qr-field textarea,.fp-qr-field select{width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023)}
@@ -1700,7 +1737,7 @@ body {
   .fp-qr-fields-2{grid-template-columns:1fr}
 }
 @media (max-width:700px){
-  .fp-qr-seg-row{grid-template-columns:1fr}
+  .fp-qr-seg-row{grid-template-columns:auto minmax(0,1fr)}
   .fp-qr-seg-ops{justify-content:flex-end;flex-wrap:wrap}
   .fp-qr-bar .fp-select{min-width:0}
 }
@@ -1720,15 +1757,85 @@ body {
 .fp-tab-debug .fp-debug-console{flex:1;min-height:0;height:100%;max-height:none}
 .fp-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
 .fp-row > label{width:98px;font-size:12px;color:var(--qr-row-label)}
+.fp-row.fp-qr-api-row{display:grid;grid-template-columns:60px minmax(0,1fr);column-gap:8px;align-items:center}
+.fp-row.fp-qr-api-row > label{width:auto}
+.fp-row.fp-qr-api-row.fp-row-block{align-items:start}
 .fp-row > input,.fp-row > textarea,.fp-row > select{flex:1;padding:9px 14px;border-radius:var(--qr-control-radius);border:1px solid var(--qr-btn-border,rgba(120,120,130,.28));background:var(--qr-bg-input,var(--qr-bg-3,#fff));color:var(--qr-text-1,#1f2023)}
 .fp-row > select{appearance:none;-webkit-appearance:none;-moz-appearance:none;padding-right:38px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4.2 6.2 8 10l3.8-3.8' stroke='%23939aa8' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:12px 12px}
+.fp-row [data-qr-load-models]{height:var(--qr-control-min-h);min-height:var(--qr-control-min-h);padding:0 12px;line-height:1.2;box-sizing:border-box}
+.fp-textarea{width:100%;min-height:124px!important;padding:11px 14px!important;line-height:1.55;resize:vertical;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--qr-accent) 46%, #95a0af 54%) color-mix(in srgb,var(--qr-bg-input) 84%, #000 16%)}
+.fp-textarea::-webkit-scrollbar{width:11px;height:11px}
+.fp-textarea::-webkit-scrollbar-track{background:color-mix(in srgb,var(--qr-bg-input) 82%, #000 18%);border-left:1px solid color-mix(in srgb,var(--qr-btn-border) 72%, transparent 28%);border-radius:10px}
+.fp-textarea::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--qr-accent) 46%, #95a0af 54%);border-radius:999px;border:2px solid color-mix(in srgb,var(--qr-bg-input) 82%, #000 18%);background-clip:padding-box}
+.fp-textarea::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--qr-accent) 60%, #8a95a5 40%)}
+.fp-textarea::-webkit-scrollbar-corner{background:color-mix(in srgb,var(--qr-bg-input) 82%, #000 18%)}
+.fp-textarea::-webkit-resizer{
+  background:
+    linear-gradient(135deg,
+      transparent 0 56%,
+      color-mix(in srgb,var(--qr-accent) 38%, #96a2b2 62%) 56% 61%,
+      transparent 61% 71%,
+      color-mix(in srgb,var(--qr-accent) 48%, #8e9aad 52%) 71% 76%,
+      transparent 76% 100%);
+}
+.fp-textarea[data-qr-extra-body-params]{height:220px!important;min-height:220px!important}
 .fp-ph-top{display:flex;flex-direction:column;gap:8px;margin-bottom:8px}
+.fp-ph-top-layout{display:flex;flex-direction:column;gap:10px}
+.fp-ph-top-fields{display:flex;flex-direction:column;gap:8px;min-width:0}
 .fp-row.fp-ph-top-row{align-items:flex-start;margin-bottom:0}
 .fp-row.fp-ph-top-row > label{padding-top:8px}
 .fp-ph-top-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
 .fp-ph-top-line{display:flex;gap:8px;align-items:center;min-width:0}
 .fp-ph-auto-spacer{width:88px;flex:0 0 88px;visibility:hidden;pointer-events:none}
 .fp-ph-meta{font-size:12px;color:var(--qr-text-2)}
+.fp-ph-context-card{position:relative;overflow:hidden;border:1px solid color-mix(in srgb,var(--qr-card-border) 84%, var(--qr-accent) 16%);border-radius:16px;background:
+  linear-gradient(180deg,color-mix(in srgb,var(--qr-bg-2) 94%, var(--qr-bg-3) 6%),color-mix(in srgb,var(--qr-bg-3) 99%, transparent));
+padding:11px 12px 12px;
+box-shadow:0 8px 22px rgba(0,0,0,.045),inset 0 1px 0 rgba(255,255,255,.02);
+width:100%}
+.fp-ph-context-card::before{content:"";position:absolute;left:12px;right:12px;top:0;height:2px;border-radius:999px;background:linear-gradient(90deg,color-mix(in srgb,var(--qr-accent) 58%, transparent),color-mix(in srgb,var(--qr-accent) 12%, transparent))}
+.fp-ph-context-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.fp-ph-context-title-wrap{display:flex;align-items:center;gap:8px;min-width:0}
+.fp-ph-context-title-dot{width:7px;height:7px;border-radius:999px;background:var(--qr-accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--qr-accent) 10%, transparent)}
+.fp-ph-context-title{font-size:12px;font-weight:800;letter-spacing:.18px;color:var(--qr-text-1)}
+.fp-ph-context-caption{display:none}
+.fp-ph-context-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;border:1px solid color-mix(in srgb,var(--qr-accent) 14%, var(--qr-btn-border) 86%);background:color-mix(in srgb,var(--qr-bg-input) 94%, var(--qr-accent) 6%);color:var(--qr-text-1);font-size:10px;font-weight:700;line-height:1;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+.fp-ph-context-badge::before{content:"";width:7px;height:7px;border-radius:999px;background:var(--qr-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--qr-accent) 16%, transparent)}
+.fp-ph-context-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;align-items:stretch}
+.fp-ph-context-item{display:flex;flex-direction:column;gap:5px;min-width:0;padding:10px 10px 9px;border-radius:13px;border:1px solid color-mix(in srgb,var(--qr-card-border) 92%, var(--qr-accent) 8%);background:linear-gradient(180deg,color-mix(in srgb,var(--qr-bg-input) 84%, transparent),color-mix(in srgb,var(--qr-bg-3) 98%, transparent));box-shadow:inset 0 1px 0 rgba(255,255,255,.015)}
+.fp-ph-context-item.map-overview{grid-column:1/-1;gap:8px;border-color:color-mix(in srgb,var(--qr-card-border) 78%, var(--qr-accent) 22%);background:linear-gradient(180deg,color-mix(in srgb,var(--qr-bg-input) 88%, var(--qr-accent) 12%),color-mix(in srgb,var(--qr-bg-3) 98%, transparent))}
+.fp-ph-context-label{font-size:10px;font-weight:800;letter-spacing:.44px;color:var(--qr-text-2);text-transform:uppercase}
+.fp-ph-context-value{font-size:13px;font-weight:800;color:var(--qr-text-1);line-height:1.24;word-break:break-word}
+.fp-ph-context-sub{font-size:11px;color:var(--qr-text-2);line-height:1.32;word-break:break-word}
+.fp-ph-context-value.is-placeholder,.fp-ph-context-sub.is-placeholder{color:var(--qr-text-2);font-weight:600}
+.fp-ph-map-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.fp-ph-map-head-main{display:flex;flex-direction:column;gap:5px;min-width:0}
+.fp-ph-map-meta{display:flex;flex-wrap:wrap;gap:6px}
+.fp-ph-map-meta-pill{display:inline-flex;align-items:center;gap:5px;min-height:20px;padding:0 8px;border-radius:999px;border:1px solid color-mix(in srgb,var(--qr-card-border) 82%, var(--qr-accent) 18%);background:color-mix(in srgb,var(--qr-bg-input) 90%, var(--qr-accent) 10%);font-size:10px;font-weight:700;line-height:1;color:var(--qr-text-1)}
+.fp-ph-map-meta-pill.is-soft{color:var(--qr-text-2);background:color-mix(in srgb,var(--qr-bg-input) 94%, transparent)}
+.fp-ph-map-preview{display:flex;flex-wrap:wrap;gap:6px}
+.fp-ph-map-chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;min-height:26px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--qr-card-border) 74%, var(--qr-accent) 26%);background:color-mix(in srgb,var(--qr-bg-input) 84%, var(--qr-accent) 16%);font-size:10px;font-weight:700;line-height:1;color:var(--qr-text-1)}
+.fp-ph-map-chip .fp-ph-map-chip-key{flex:0 0 auto;color:var(--qr-text-2);font-weight:800}
+.fp-ph-map-chip .fp-ph-map-chip-sep{flex:0 0 auto;width:4px;height:4px;border-radius:999px;background:color-mix(in srgb,var(--qr-accent) 58%, var(--qr-text-2) 42%);opacity:.9}
+.fp-ph-map-chip .fp-ph-map-chip-val{min-width:0;max-width:124px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fp-ph-map-chip.is-overflow{background:color-mix(in srgb,var(--qr-bg-input) 90%, transparent);border-style:dashed;color:var(--qr-text-2)}
+.fp-ph-map-toggle{display:inline-flex;align-items:center;gap:5px;min-height:26px;padding:0 9px;border:none;border-radius:999px;background:color-mix(in srgb,var(--qr-btn-bg) 88%, var(--qr-accent) 12%);color:var(--qr-text-1);font-size:10px;font-weight:700;line-height:1;cursor:pointer;box-shadow:none}
+.fp-ph-map-toggle:hover{background:color-mix(in srgb,var(--qr-btn-hover-bg) 74%, var(--qr-accent) 26%)}
+.fp-ph-map-toggle .fp-ico{width:12px;height:12px;transition:transform .18s ease}
+.fp-ph-map-toggle[aria-expanded="true"] .fp-ico{transform:rotate(180deg)}
+.fp-ph-map-detail{display:none;padding-top:2px}
+.fp-ph-map-detail.is-open{display:block}
+.fp-ph-map-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.fp-ph-map-detail-row{display:flex;align-items:center;gap:6px;min-width:0;padding:7px 8px;border-radius:10px;background:color-mix(in srgb,var(--qr-bg-input) 84%, transparent);border:1px solid color-mix(in srgb,var(--qr-card-border) 90%, var(--qr-accent) 10%)}
+.fp-ph-map-detail-key{flex:0 0 auto;font-size:10px;font-weight:800;color:var(--qr-text-2)}
+.fp-ph-map-detail-sep{flex:0 0 auto;width:4px;height:4px;border-radius:999px;background:color-mix(in srgb,var(--qr-accent) 58%, var(--qr-text-2) 42%);opacity:.9}
+.fp-ph-map-detail-val{min-width:0;font-size:11px;font-weight:700;color:var(--qr-text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width: 680px){
+  .fp-ph-context-grid{grid-template-columns:1fr}
+  .fp-ph-context-item.map-overview{grid-column:auto}
+  .fp-ph-map-head{flex-direction:column;align-items:stretch}
+  .fp-ph-map-toggle{align-self:flex-start}
+}
 .fp-row.fp-row-block{align-items:flex-start}
 .fp-row.fp-row-block > label{padding-top:8px}
 .fp-ph-field{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0}
@@ -1801,7 +1908,7 @@ body {
 .fp-color-opt:hover{transform:scale(1.08);border-color:rgba(255,255,255,.52)}
 .fp-color-opt.active{border-color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.2)}
 .fp-color-opt .fp-color-dot{width:14px;height:14px}
-.fp-row > textarea{min-height:90px;resize:vertical}
+.fp-row > textarea.fp-textarea{min-height:124px}
 .fp-settings-card [data-custom-css]{min-height:240px;height:240px}
 .fp-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px;flex-shrink:0}
 .fp-actions button{padding:8px 14px;border-radius:999px;min-height:var(--qr-btn-h-lg);border:none;background:color-mix(in srgb,var(--qr-btn-bg,var(--qr-bg-3,#fff)) 94%, #fff 6%);color:var(--qr-text-1);cursor:pointer;font-weight:600;box-shadow:0 0 0 1px var(--qr-btn-ring),0 2px 8px rgba(0,0,0,.16);transition:background .18s ease,box-shadow .2s ease,transform .12s ease,filter .16s ease}
@@ -2387,6 +2494,7 @@ body {
 @keyframes fp-menu-pop{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
 @keyframes fp-tab-fadein{from{opacity:0}to{opacity:1}}
 @keyframes fp-qr-gen-pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.16);opacity:.7}}
+@keyframes fp-editor-shimmer{from{background-position:200% 0}to{background-position:-20% 0}}
 .fp-tab.active{animation:fp-tab-fadein .2s ease}
 @media (max-width: 900px){
   .fp-top{grid-template-columns:1fr;gap:8px}
@@ -2395,6 +2503,8 @@ body {
   .fp-settings-card{--fp-settings-min-h:360px;height:min(82vh,var(--fp-settings-max-h))}
   .fp-settings-shell{grid-template-columns:1fr}
   .fp-settings-nav{border-right:none;border-bottom:1px solid rgba(24,24,27,.12);padding-right:0;padding-bottom:8px;flex-direction:row;overflow:auto}
+  .fp-ph-context-grid{grid-template-columns:1fr}
+  .fp-ph-map-detail-grid{grid-template-columns:1fr}
 }
 `;
     (pD.head || pD.body).appendChild(style);
@@ -2480,20 +2590,116 @@ body {
   function detectCurrentCharacterState(): { characterId: string | null; characterName: string; isGroupChat: boolean } {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ctx = getContext() as any;
-    const groupId = String(ctx?.groupId ?? (pW as any)?.SillyTavern?.groupId ?? '').trim();
+    const st = (pW as any)?.SillyTavern || {};
+    const groupId = String(ctx?.groupId ?? st?.groupId ?? '').trim();
     const isGroupChat = Boolean(groupId);
     if (isGroupChat) return { characterId: null, characterName: '群聊', isGroupChat: true };
 
+    const readExplicitCharacterRef = (): { raw: unknown; hasRef: boolean } => {
+      const candidates: Array<[boolean, unknown]> = [
+        [ctx && Object.prototype.hasOwnProperty.call(ctx, 'characterId'), ctx?.characterId],
+        [ctx && Object.prototype.hasOwnProperty.call(ctx, 'character_id'), ctx?.character_id],
+        [ctx && Object.prototype.hasOwnProperty.call(ctx, 'this_chid'), ctx?.this_chid],
+        [st && Object.prototype.hasOwnProperty.call(st, 'characterId'), st?.characterId],
+        [st && Object.prototype.hasOwnProperty.call(st, 'this_chid'), st?.this_chid],
+        [typeof (globalThis as unknown as { this_chid?: unknown }).this_chid !== 'undefined', (globalThis as unknown as { this_chid?: unknown }).this_chid],
+      ];
+      for (const [hasRef, raw] of candidates) {
+        if (!hasRef) continue;
+        return { raw, hasRef: true };
+      }
+      return { raw: null, hasRef: false };
+    };
+
+    const findCardByRef = (rawRef: unknown): { avatar?: string; name?: string } | null => {
+      const ref = String(rawRef ?? '').trim();
+      const numericRef = Number(ref);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pick = (entry: any): { avatar?: string; name?: string } | null => (entry && typeof entry === 'object') ? entry : null;
+      const pools: unknown[] = [];
+      if (typeof getCharData === 'function') {
+        try { pools.push(getCharData('all') as unknown); } catch (e) {}
+      }
+      pools.push(ctx?.characters, ctx?.characterList, ctx?.allCharacters, st?.characters, st?.characterList, st?.allCharacters);
+
+      for (const all of pools) {
+        if (!all) continue;
+        if (Array.isArray(all)) {
+          if (Number.isFinite(numericRef) && numericRef >= 0 && numericRef < all.length) {
+            const byIndex = pick(all[Math.trunc(numericRef)]);
+            if (byIndex) return byIndex;
+          }
+          const byMatch = pick(all.find((entry) => {
+            const avatar = String((entry as { avatar?: unknown })?.avatar ?? '').trim();
+            const name = String((entry as { name?: unknown })?.name ?? '').trim();
+            return ref && (avatar === ref || name === ref);
+          }));
+          if (byMatch) return byMatch;
+          continue;
+        }
+        if (typeof all === 'object') {
+          const byKey = (all as Record<string, unknown>)[ref];
+          if (byKey && typeof byKey === 'object') return pick(byKey);
+          for (const [key, value] of Object.entries(all as Record<string, unknown>)) {
+            const entry = pick(value);
+            if (!entry) continue;
+            const avatar = String(entry.avatar ?? key).trim();
+            const name = String(entry.name ?? '').trim();
+            if (ref && (avatar === ref || name === ref || key === ref)) return entry;
+          }
+        }
+      }
+      return null;
+    };
+
+    const explicitRef = readExplicitCharacterRef();
+    const explicitRefText = String(explicitRef.raw ?? '').trim();
+    const hasExplicitNoCharacter = explicitRef.hasRef && !explicitRefText;
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const card = (typeof getCharData === 'function' ? (getCharData('current') as any) : null) || null;
-    const characterId = String(card?.avatar || card?.name || '').trim() || null;
-    let characterName = String(card?.name || '').trim();
+    const currentCard = !hasExplicitNoCharacter && typeof getCharData === 'function' ? ((getCharData('current') as any) || null) : null;
+    const resolvedCard = explicitRefText ? (findCardByRef(explicitRef.raw) || currentCard) : currentCard;
+
+    const characterId = String(resolvedCard?.avatar || resolvedCard?.name || '').trim() || null;
+    let characterName = String(resolvedCard?.name || '').trim();
     if (!characterName) {
       try {
         if (typeof substitudeMacros === 'function') characterName = String(substitudeMacros('{{char}}') || '').trim();
       } catch (e) {}
     }
+    if (!characterId && characterName) {
+      const byName = findCardByRef(characterName);
+      if (byName) {
+        return {
+          characterId: String(byName.avatar || byName.name || '').trim() || null,
+          characterName: String(byName.name || characterName || '').trim(),
+          isGroupChat: false,
+        };
+      }
+    }
+
+    if (!characterId && hasExplicitNoCharacter) {
+      return { characterId: null, characterName: '', isGroupChat: false };
+    }
     return { characterId, characterName: characterName || '当前角色', isGroupChat: false };
+  }
+
+  function isWorkbenchOpen(): boolean {
+    return !!pD.getElementById(OVERLAY_ID);
+  }
+
+  function hasOpenWorkbenchModal(): boolean {
+    const overlay = pD.getElementById(OVERLAY_ID);
+    return !!overlay?.querySelector('.fp-modal');
+  }
+
+  function handleActiveCharacterContextChanged(opts?: { silent?: boolean; force?: boolean; rerender?: boolean }): boolean {
+    const prevKey = state.activeCharacterSwitchKey;
+    syncActiveCharacterMapping({ silent: opts?.silent, force: opts?.force });
+    const changed = prevKey !== state.activeCharacterSwitchKey;
+    if (changed) persistPack();
+    if (changed && opts?.rerender && isWorkbenchOpen() && !hasOpenWorkbenchModal()) renderWorkbench();
+    return changed;
   }
 
   function getCurrentRolePlaceholderMap(createIfMissing = false): Record<string, string> | null {
@@ -2654,6 +2860,27 @@ body {
     });
   }
 
+  function extractPlaceholderTokens(text: string): string[] {
+    const tokens = new Set<string>();
+    String(text || '').replace(/\{@([^:}]+)(?::([^}]*))?\}/g, (full) => {
+      const token = String(full || '').trim();
+      if (token) tokens.add(token);
+      return full;
+    });
+    return Array.from(tokens.values());
+  }
+
+  function extractPlaceholderFallbackMap(text: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    String(text || '').replace(/\{@([^:}]+)(?::([^}]*))?\}/g, (_full, key: string, fallback: string) => {
+      const safeKey = String(key || '').trim();
+      if (!safeKey) return _full;
+      if (fallback !== undefined && String(fallback).length > 0) out[safeKey] = String(fallback);
+      return _full;
+    });
+    return out;
+  }
+
   function splitMultiValue(raw: string): string[] {
     return String(raw || '')
       .split(/[,\n，、|｜]+/g)
@@ -2808,10 +3035,14 @@ body {
     return out;
   }
 
-  function getEffectivePlaceholderMapForLlm(): Record<string, string> {
+  function getEffectivePlaceholderMapForLlm(draft?: string): Record<string, string> {
     const placeholders = state.pack?.settings?.placeholders || {};
     const roleValues = getCurrentRolePlaceholderMap(false);
-    return getEffectivePlaceholderValues(placeholders, roleValues);
+    const merged = getEffectivePlaceholderValues(placeholders, roleValues);
+    return {
+      ...merged,
+      ...extractPlaceholderFallbackMap(String(draft || '')),
+    };
   }
 
   function getActiveQrLlmPreset(): QrLlmPreset {
@@ -2830,8 +3061,10 @@ body {
     placeholderMap: Record<string, string>,
   ): string {
     const placeholderList = Object.keys(placeholderMap || {}).map((x) => `- ${x}`).join('\n') || '- (无)';
+    const draftPlaceholderTokens = extractPlaceholderTokens(draft).join('\n') || '- (草稿中未出现占位符)';
     return String(template || '')
       .replaceAll('{{draft}}', String(draft || ''))
+      .replaceAll('{{draft_placeholder_tokens}}', draftPlaceholderTokens)
       .replaceAll('{{placeholder_list}}', placeholderList)
       .replaceAll('{{placeholder_map_json}}', JSON.stringify(placeholderMap || {}, null, 2));
   }
@@ -3235,7 +3468,7 @@ body {
     if (!secret.url) throw new Error('请先在设置中填写 API URL');
     if (!modelId) throw new Error('请先在设置中选择或填写模型ID');
 
-    const placeholderMap = getEffectivePlaceholderMapForLlm();
+    const placeholderMap = getEffectivePlaceholderMapForLlm(draft);
     const preset = getActiveQrLlmPreset();
     const systemPrompt = String(preset.systemPrompt || '').trim() || '你是执行内容扩写助手。';
     const userPromptTemplate = String(preset.userPromptTemplate || '').trim() || '{{draft}}';
@@ -3546,19 +3779,38 @@ body {
       .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
   }
 
-  function moveCategory(dragId: string, targetId: string): void {
+  function normalizeCategoryOrders(parentId: string | null): void {
+    const siblings = treeChildren(parentId);
+    siblings.forEach((cat, idx) => { cat.order = idx; });
+  }
+
+  function moveCategoryRelative(dragId: string, targetId: string, mode: 'before' | 'after' | 'inside'): void {
     if (!dragId || !targetId || dragId === targetId) return;
     const drag = getCategoryById(dragId);
     const target = getCategoryById(targetId);
     if (!drag || !target) return;
-    let p: Category | null = target;
+    let p: Category | null = mode === 'inside' ? target : (target.parentId ? getCategoryById(target.parentId) : null);
     while (p) {
       if (p.id === drag.id) return;
       p = p.parentId ? getCategoryById(p.parentId) : null;
     }
-    drag.parentId = target.id;
-    const siblings = treeChildren(target.id);
-    drag.order = siblings.length;
+
+    const oldParentId = drag.parentId;
+    const newParentId = mode === 'inside' ? target.id : target.parentId;
+    const siblings = treeChildren(newParentId);
+    const filtered = siblings.filter((c) => c.id !== dragId);
+    let insertIndex = filtered.length;
+    if (mode !== 'inside') {
+      const targetIndex = filtered.findIndex((c) => c.id === targetId);
+      if (targetIndex >= 0) insertIndex = mode === 'before' ? targetIndex : targetIndex + 1;
+    }
+    if (insertIndex < 0) insertIndex = 0;
+    if (insertIndex > filtered.length) insertIndex = filtered.length;
+
+    drag.parentId = newParentId;
+    filtered.splice(insertIndex, 0, drag);
+    filtered.forEach((cat, idx) => { cat.order = idx; });
+    if (oldParentId !== newParentId) normalizeCategoryOrders(oldParentId);
     persistPack();
   }
 
@@ -3566,8 +3818,33 @@ body {
     if (!state.pack) return;
     const item = state.pack.items.find((i) => i.id === itemId);
     if (!item || !getCategoryById(targetCatId)) return;
+    const oldCatId = item.categoryId;
+    const siblings = state.pack.items
+      .filter((i) => i.categoryId === targetCatId && i.id !== itemId)
+      .sort((a, b) => a.order - b.order);
     item.categoryId = targetCatId;
-    item.order = getItemsByCategory(targetCatId, false).length;
+    siblings.push(item);
+    siblings.forEach((it, idx) => { it.order = idx; });
+    if (oldCatId && oldCatId !== targetCatId) {
+      getItemsByCategory(oldCatId, false).forEach((it, idx) => { it.order = idx; });
+    }
+    persistPack();
+  }
+
+  function reorderItemWithinCategory(itemId: string, targetIndex: number): void {
+    if (!state.pack) return;
+    const item = state.pack.items.find((i) => i.id === itemId);
+    const catId = item?.categoryId || null;
+    if (!item || !catId) return;
+    const siblings = getItemsByCategory(catId, false);
+    const fromIndex = siblings.findIndex((i) => i.id === itemId);
+    if (fromIndex < 0) return;
+    const filtered = siblings.filter((i) => i.id !== itemId);
+    let toIndex = Number.isFinite(targetIndex) ? Math.trunc(targetIndex) : filtered.length;
+    if (toIndex < 0) toIndex = 0;
+    if (toIndex > filtered.length) toIndex = filtered.length;
+    filtered.splice(toIndex, 0, item);
+    filtered.forEach((it, idx) => { it.order = idx; });
     persistPack();
   }
 
@@ -3590,6 +3867,173 @@ body {
     return ghost;
   }
 
+  type SnapshotRect = {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    centerX: number;
+    centerY: number;
+  };
+
+  type SnapshotEntry<T extends HTMLElement> = {
+    el: T;
+    index: number;
+    rect: SnapshotRect;
+  };
+
+  type SnapshotPlacement<T extends HTMLElement> = {
+    dropIndex: number;
+    placementKey: string;
+    targetEl?: T | null;
+    insertBeforeEl?: HTMLElement | null;
+  };
+
+  function runSnapshotReorderDrag<T extends HTMLElement>(opts: {
+    startEvent: PointerEvent;
+    sourceEl: HTMLElement;
+    containerEl: HTMLElement;
+    scrollHost: HTMLElement;
+    createPlaceholder: () => HTMLElement;
+    getSnapshotElements: () => T[];
+    resolvePlacement: (ctx: {
+      event: PointerEvent;
+      snapshots: Array<SnapshotEntry<T>>;
+      lastPlacementKey: string;
+    }) => SnapshotPlacement<T> | null;
+    onDragStart?: (ctx: { ghost: HTMLElement; placeholder: HTMLElement }) => void;
+    onMove?: (ctx: { event: PointerEvent; dragging: boolean; ghost: HTMLElement | null; placeholder: HTMLElement | null }) => boolean | void;
+    onPlacementChange?: (placement: SnapshotPlacement<T>) => void;
+    onCleanup?: () => void;
+    onDrop: (dropIndex: number, didDrag: boolean) => void;
+    ghostOffsetX?: number;
+    ghostOffsetY?: number;
+    tailAnchorResolver?: () => HTMLElement | null;
+  }): void {
+    const startX = opts.startEvent.clientX;
+    const startY = opts.startEvent.clientY;
+    let dragging = false;
+    let ghost: HTMLElement | null = null;
+    let placeholder: HTMLElement | null = null;
+    let snapshots: Array<SnapshotEntry<T>> = [];
+    let snapshotScrollTop = 0;
+    let dropIndex = -1;
+    let lastPlacementKey = '';
+
+    const captureSnapshots = () => {
+      snapshotScrollTop = opts.scrollHost.scrollTop;
+      snapshots = opts.getSnapshotElements().map((el, index) => {
+        const rect = el.getBoundingClientRect();
+        return {
+          el,
+          index,
+          rect: {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+            centerX: rect.left + rect.width / 2,
+            centerY: rect.top + rect.height / 2,
+          },
+        };
+      });
+    };
+
+    const getAdjustedSnapshots = (): Array<SnapshotEntry<T>> => {
+      const scrollDy = opts.scrollHost.scrollTop - snapshotScrollTop;
+      return snapshots.map((snap) => ({
+        ...snap,
+        rect: {
+          ...snap.rect,
+          top: snap.rect.top - scrollDy,
+          centerY: snap.rect.centerY - scrollDy,
+        },
+      }));
+    };
+
+    const cleanup = () => {
+      pW.removeEventListener('pointermove', onMove as EventListener);
+      pW.removeEventListener('pointerup', onUp as EventListener);
+      pW.removeEventListener('pointercancel', onUp as EventListener);
+      if (ghost) ghost.remove();
+      if (placeholder?.parentElement) placeholder.remove();
+      opts.onCleanup?.();
+    };
+
+    const placePlaceholder = (placement: SnapshotPlacement<T>) => {
+      if (!placeholder) return;
+      const currentIndex = placeholder.parentElement === opts.containerEl
+        ? Array.from(opts.containerEl.children).indexOf(placeholder)
+        : -1;
+      let desiredIndex = currentIndex;
+      if (placement.insertBeforeEl) {
+        desiredIndex = Array.from(opts.containerEl.children).indexOf(placement.insertBeforeEl);
+        if (currentIndex !== desiredIndex) opts.containerEl.insertBefore(placeholder, placement.insertBeforeEl);
+        return;
+      }
+      const tailAnchor = opts.tailAnchorResolver?.() || null;
+      desiredIndex = tailAnchor ? Array.from(opts.containerEl.children).indexOf(tailAnchor) : opts.containerEl.children.length;
+      if (currentIndex !== desiredIndex) {
+        if (tailAnchor) opts.containerEl.insertBefore(placeholder, tailAnchor);
+        else opts.containerEl.appendChild(placeholder);
+      }
+    };
+
+    const onMove = (moveEv: PointerEvent) => {
+      const dx = moveEv.clientX - startX;
+      const dy = moveEv.clientY - startY;
+      if (!dragging && Math.hypot(dx, dy) < 6) return;
+      if (!dragging) {
+        dragging = true;
+        suppressNextClick(260);
+        ghost = createDragGhost(opts.sourceEl);
+        placeholder = opts.createPlaceholder();
+        captureSnapshots();
+        placePlaceholder({ dropIndex: snapshots.length, placementKey: '__init__' });
+        opts.onDragStart?.({ ghost, placeholder });
+      }
+
+      if (ghost) {
+        ghost.style.left = `${Math.round(moveEv.clientX + Number(opts.ghostOffsetX ?? 12))}px`;
+        ghost.style.top = `${Math.round(moveEv.clientY + Number(opts.ghostOffsetY ?? 12))}px`;
+      }
+
+      const shouldSkipPlacement = opts.onMove?.({ event: moveEv, dragging, ghost, placeholder }) === true;
+      if (shouldSkipPlacement) {
+        moveEv.preventDefault();
+        return;
+      }
+
+      const placement = opts.resolvePlacement({
+        event: moveEv,
+        snapshots: getAdjustedSnapshots(),
+        lastPlacementKey,
+      });
+      if (!placement) {
+        moveEv.preventDefault();
+        return;
+      }
+      dropIndex = placement.dropIndex;
+      if (lastPlacementKey !== placement.placementKey) {
+        lastPlacementKey = placement.placementKey;
+        opts.onPlacementChange?.(placement);
+      }
+      placePlaceholder(placement);
+      moveEv.preventDefault();
+    };
+
+    const onUp = () => {
+      const didDrag = dragging;
+      const finalDropIndex = dropIndex;
+      cleanup();
+      opts.onDrop(finalDropIndex, didDrag);
+    };
+
+    pW.addEventListener('pointermove', onMove as EventListener, { passive: false });
+    pW.addEventListener('pointerup', onUp as EventListener, { passive: false });
+    pW.addEventListener('pointercancel', onUp as EventListener, { passive: false });
+  }
+
   function canDropCategoryTo(dragId: string, targetId: string): boolean {
     if (!dragId || !targetId || dragId === targetId) return false;
     const drag = getCategoryById(dragId);
@@ -3602,18 +4046,204 @@ body {
     return true;
   }
 
-  function attachPointerCategoryDropDrag(el: HTMLElement, payload: DragData): void {
+  function clearTreeAutoExpand(stateRef: { timer: ReturnType<typeof setTimeout> | null; catId: string | null }): void {
+    if (stateRef.timer) clearTimeout(stateRef.timer);
+    stateRef.timer = null;
+    stateRef.catId = null;
+  }
+
+  function scheduleTreeAutoExpand(
+    catId: string,
+    onTreeRefresh: (() => void) | undefined,
+    stateRef: { timer: ReturnType<typeof setTimeout> | null; catId: string | null },
+  ): void {
+    if (!onTreeRefresh || !state.pack || !catId) {
+      clearTreeAutoExpand(stateRef);
+      return;
+    }
+    const children = treeChildren(catId);
+    const expanded = state.pack.uiState.sidebar.expanded || {};
+    if (!children.length || expanded[catId] !== false) {
+      clearTreeAutoExpand(stateRef);
+      return;
+    }
+    if (stateRef.catId === catId && stateRef.timer) return;
+    clearTreeAutoExpand(stateRef);
+    stateRef.catId = catId;
+    stateRef.timer = setTimeout(() => {
+      stateRef.timer = null;
+      stateRef.catId = null;
+      if (!state.pack) return;
+      state.pack.uiState.sidebar.expanded[catId] = true;
+      persistPack();
+      onTreeRefresh();
+    }, 520);
+  }
+
+  type ItemTreeDropStrategy = {
+    currentCategoryId: string | null;
+    autoExpand: { timer: ReturnType<typeof setTimeout> | null; catId: string | null };
+    dropCatId: string | null;
+    dropTreeNode: HTMLElement | null;
+    clear(): void;
+    handlePointer(event: PointerEvent): boolean;
+    consumeDrop(): string | null;
+  };
+
+  function createItemTreeDropStrategy(currentCategoryId: string | null, onTreeRefresh?: () => void): ItemTreeDropStrategy {
+    const strategy: ItemTreeDropStrategy = {
+      currentCategoryId,
+      autoExpand: { timer: null, catId: null },
+      dropCatId: null,
+      dropTreeNode: null,
+      clear() {
+        if (strategy.dropTreeNode) {
+          strategy.dropTreeNode.classList.remove('drop-target', 'drop-before', 'drop-after', 'drop-inside');
+        }
+        strategy.dropTreeNode = null;
+        strategy.dropCatId = null;
+        clearTreeAutoExpand(strategy.autoExpand);
+      },
+      handlePointer(event: PointerEvent) {
+        const hit = pD.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
+        const treeNode = hit?.closest('.fp-tree-node[data-cat-id]') as HTMLElement | null;
+        if (!treeNode) {
+          strategy.clear();
+          return false;
+        }
+        const catId = treeNode.dataset.catId || '';
+        if (!getCategoryById(catId) || catId === (strategy.currentCategoryId || '')) {
+          strategy.clear();
+          return false;
+        }
+        if (strategy.dropTreeNode !== treeNode) {
+          strategy.clear();
+          treeNode.classList.add('drop-target', 'drop-inside');
+          strategy.dropTreeNode = treeNode;
+          strategy.dropCatId = catId;
+        }
+        scheduleTreeAutoExpand(catId, onTreeRefresh, strategy.autoExpand);
+        return true;
+      },
+      consumeDrop() {
+        const finalCatId = strategy.dropCatId;
+        strategy.clear();
+        return finalCatId;
+      },
+    };
+    return strategy;
+  }
+
+  function createItemCardDragStrategy(item: Item, onTreeRefresh?: () => void) {
+    const treeDropStrategy = createItemTreeDropStrategy(item.categoryId || null, onTreeRefresh);
+    let dropCardNode: HTMLElement | null = null;
+    let lastCardPlacement: { itemId: string; side: 'before' | 'after' } | null = null;
+
+    const clearCardDrop = () => {
+      if (dropCardNode) dropCardNode.classList.remove('drop-before', 'drop-after');
+      dropCardNode = null;
+      lastCardPlacement = null;
+    };
+
+    return {
+      clearAll() {
+        treeDropStrategy.clear();
+        clearCardDrop();
+      },
+      handleTreePointer(event: PointerEvent): boolean {
+        return treeDropStrategy.handlePointer(event);
+      },
+      consumeTreeDrop(): string | null {
+        return treeDropStrategy.consumeDrop();
+      },
+      resolveCardPlacement(
+        event: PointerEvent,
+        snapshots: Array<SnapshotEntry<HTMLElement>>,
+      ): SnapshotPlacement<HTMLElement> | null {
+        if (!snapshots.length) return { dropIndex: 0, placementKey: 'card:end' };
+        const hit = snapshots.find((snap) =>
+          event.clientX >= snap.rect.left - 8 &&
+          event.clientX <= snap.rect.left + snap.rect.width + 8 &&
+          event.clientY >= snap.rect.top - 10 &&
+          event.clientY <= snap.rect.top + snap.rect.height + 10,
+        );
+        if (hit) {
+          const sameRow = event.clientY >= hit.rect.top - 6 && event.clientY <= hit.rect.top + hit.rect.height + 6;
+          const hysteresis = sameRow
+            ? Math.max(14, Math.min(26, hit.rect.width * 0.09))
+            : Math.max(10, Math.min(18, hit.rect.height * 0.22));
+          const axisPos = sameRow ? event.clientX : event.clientY;
+          const axisMid = sameRow ? hit.rect.centerX : hit.rect.centerY;
+          let before = axisPos < axisMid;
+          if (lastCardPlacement && lastCardPlacement.itemId === hit.el.dataset.itemId) {
+            if (lastCardPlacement.side === 'before' && axisPos < axisMid + hysteresis) before = true;
+            if (lastCardPlacement.side === 'after' && axisPos > axisMid - hysteresis) before = false;
+          }
+          return {
+            dropIndex: before ? hit.index : hit.index + 1,
+            placementKey: `card:${hit.el.dataset.itemId || ''}:${before ? 'before' : 'after'}`,
+            targetEl: hit.el,
+            insertBeforeEl: before ? hit.el : (snapshots[hit.index + 1]?.el || null),
+          };
+        }
+        const aboveAll = snapshots.every((snap) => event.clientY < snap.rect.top);
+        if (aboveAll) {
+          return {
+            dropIndex: 0,
+            placementKey: `card:${snapshots[0]?.el.dataset.itemId || ''}:before`,
+            targetEl: snapshots[0]?.el || null,
+            insertBeforeEl: snapshots[0]?.el || null,
+          };
+        }
+        const belowAll = snapshots.every((snap) => event.clientY > snap.rect.top + snap.rect.height);
+        if (belowAll) return { dropIndex: snapshots.length, placementKey: 'card:end' };
+
+        let nearest = snapshots[0];
+        let nearestDist = Number.POSITIVE_INFINITY;
+        for (const snap of snapshots) {
+          const dx = event.clientX - snap.rect.centerX;
+          const dy = event.clientY - snap.rect.centerY;
+          const dist = Math.abs(dx) * 0.75 + Math.abs(dy);
+          if (dist < nearestDist) {
+            nearest = snap;
+            nearestDist = dist;
+          }
+        }
+        const before = event.clientY < nearest.rect.centerY;
+        return {
+          dropIndex: before ? nearest.index : nearest.index + 1,
+          placementKey: `card:${nearest.el.dataset.itemId || ''}:${before ? 'before' : 'after'}`,
+          targetEl: nearest.el,
+          insertBeforeEl: before ? nearest.el : (snapshots[nearest.index + 1]?.el || null),
+        };
+      },
+      applyCardPlacement(placement: SnapshotPlacement<HTMLElement>) {
+        clearCardDrop();
+        if (placement.targetEl) {
+          const side = placement.placementKey.endsWith(':before') ? 'before' : 'after';
+          placement.targetEl.classList.add(side === 'before' ? 'drop-before' : 'drop-after');
+          dropCardNode = placement.targetEl;
+          lastCardPlacement = { itemId: String(placement.targetEl.dataset.itemId || ''), side };
+        }
+      },
+    };
+  }
+
+  function attachPointerCategoryDropDrag(el: HTMLElement, payload: DragData, onTreeRefresh?: () => void): void {
     let startX = 0;
     let startY = 0;
     let dragging = false;
     let ghost: HTMLElement | null = null;
     let dropNode: HTMLElement | null = null;
     let dropCatId: string | null = null;
+    let dropMode: 'before' | 'after' | 'inside' | null = null;
+    const autoExpand = { timer: null as ReturnType<typeof setTimeout> | null, catId: null as string | null };
 
     const clearDropNode = () => {
-      if (dropNode) dropNode.classList.remove('drop-target');
+      if (dropNode) dropNode.classList.remove('drop-target', 'drop-before', 'drop-after', 'drop-inside');
       dropNode = null;
       dropCatId = null;
+      dropMode = null;
     };
 
     const cleanup = () => {
@@ -3622,6 +4252,7 @@ body {
       el.classList.remove('is-pointer-dragging');
       (pD.body || pD.documentElement).classList.remove('fp-drag-active');
       clearDropNode();
+      clearTreeAutoExpand(autoExpand);
       pW.removeEventListener('pointermove', onMove as EventListener);
       pW.removeEventListener('pointerup', onUp as EventListener);
       pW.removeEventListener('pointercancel', onUp as EventListener);
@@ -3651,10 +4282,24 @@ body {
           ? Boolean(getCategoryById(catId))
           : canDropCategoryTo(payload.id, catId);
         if (valid) {
+          let mode: 'before' | 'after' | 'inside' = 'inside';
+          if (payload.type === 'category') {
+            const rect = node.getBoundingClientRect();
+            const offsetY = ev.clientY - rect.top;
+            const edgeBand = Math.min(10, rect.height * 0.28);
+            if (offsetY <= edgeBand) mode = 'before';
+            else if (offsetY >= rect.height - edgeBand) mode = 'after';
+          }
           node.classList.add('drop-target');
+          node.classList.add(mode === 'before' ? 'drop-before' : mode === 'after' ? 'drop-after' : 'drop-inside');
           dropNode = node;
           dropCatId = catId;
+          dropMode = mode;
+          if (mode === 'inside') scheduleTreeAutoExpand(catId, onTreeRefresh, autoExpand);
+          else clearTreeAutoExpand(autoExpand);
         }
+      } else {
+        clearTreeAutoExpand(autoExpand);
       }
       ev.preventDefault();
     };
@@ -3662,10 +4307,11 @@ body {
     const onUp = (_ev: PointerEvent) => {
       const shouldApply = dragging && dropCatId;
       const finalCatId = dropCatId;
+      const finalMode = dropMode;
       cleanup();
       if (!shouldApply || !finalCatId) return;
       if (payload.type === 'category') {
-        moveCategory(payload.id, finalCatId);
+        moveCategoryRelative(payload.id, finalCatId, finalMode || 'inside');
         renderWorkbench();
       } else {
         moveItemToCategory(payload.id, finalCatId);
@@ -3690,6 +4336,81 @@ body {
       pW.addEventListener('pointermove', onMove as EventListener, { passive: false });
       pW.addEventListener('pointerup', onUp as EventListener, { passive: false });
       pW.addEventListener('pointercancel', onUp as EventListener, { passive: false });
+    });
+  }
+
+  function attachPointerItemCardDrag(card: HTMLElement, item: Item, grid: HTMLElement, scrollHost: HTMLElement, onTreeRefresh?: () => void): void {
+    card.addEventListener('pointerdown', (ev: PointerEvent) => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      if (isClickSuppressed()) return;
+      const dragStrategy = createItemCardDragStrategy(item, onTreeRefresh);
+      const maybeAutoScroll = (clientY: number) => {
+        const rect = scrollHost.getBoundingClientRect();
+        const threshold = Math.min(72, Math.max(40, rect.height * 0.14));
+        let delta = 0;
+        if (clientY < rect.top + threshold) {
+          const ratio = (rect.top + threshold - clientY) / threshold;
+          delta = -Math.ceil(6 + ratio * 18);
+        } else if (clientY > rect.bottom - threshold) {
+          const ratio = (clientY - (rect.bottom - threshold)) / threshold;
+          delta = Math.ceil(6 + ratio * 18);
+        }
+        if (delta) scrollHost.scrollTop += delta;
+      };
+      runSnapshotReorderDrag<HTMLElement>({
+        startEvent: ev,
+        sourceEl: card,
+        containerEl: grid,
+        scrollHost,
+        createPlaceholder: () => {
+          const placeholder = card.cloneNode(true) as HTMLElement;
+          placeholder.classList.add('fp-card-placeholder');
+          placeholder.removeAttribute('data-item-id');
+          placeholder.removeAttribute('data-item-category');
+          return placeholder;
+        },
+        getSnapshotElements: () => Array.from(grid.querySelectorAll('.fp-card[data-item-id]'))
+          .filter((el) => el !== card && (el as HTMLElement).dataset.itemCategory === (item.categoryId || '')) as HTMLElement[],
+        resolvePlacement: ({ event, snapshots }) => dragStrategy.resolveCardPlacement(event, snapshots),
+        onDragStart: () => {
+          (pD.body || pD.documentElement).classList.add('fp-drag-active');
+          card.classList.add('is-pointer-dragging');
+          card.style.display = 'none';
+        },
+        onMove: ({ event }) => {
+          maybeAutoScroll(event.clientY);
+          if (dragStrategy.handleTreePointer(event)) {
+            dragStrategy.applyCardPlacement({ dropIndex: -1, placementKey: 'card:clear' });
+            return true;
+          }
+          return false;
+        },
+        onPlacementChange: (placement) => {
+          dragStrategy.applyCardPlacement(placement);
+        },
+        onCleanup: () => {
+          card.style.display = '';
+          (pD.body || pD.documentElement).classList.remove('fp-drag-active');
+          card.classList.remove('is-pointer-dragging');
+          dragStrategy.clearAll();
+        },
+        onDrop: (finalDropIndex, didDrag) => {
+          if (!didDrag) return;
+          const treeTargetId = dragStrategy.consumeTreeDrop();
+          if (treeTargetId) {
+            moveItemToCategory(item.id, treeTargetId);
+            renderWorkbench();
+            toast('条目已移动到分类');
+            return;
+          }
+          if (finalDropIndex >= 0 && item.categoryId) {
+            reorderItemWithinCategory(item.id, finalDropIndex);
+            renderWorkbench();
+          }
+        },
+        tailAnchorResolver: () => grid.querySelector('[data-quick-add-cat]') as HTMLElement | null,
+      });
     });
   }
 
@@ -3761,7 +4482,7 @@ body {
         state.currentCategoryId = cat.id;
         onSelect();
       };
-      attachPointerCategoryDropDrag(node, { type: 'category', id: cat.id });
+      attachPointerCategoryDropDrag(node, { type: 'category', id: cat.id }, () => renderTree(treeEl, onSelect));
 
       treeEl.appendChild(node);
       if (kids.length && isOpen) {
@@ -3849,14 +4570,18 @@ body {
     input.focus();
   }
 
-  function getOrderedPlaceholderEntries(): Array<{ key: string; value: string }> {
+  function getOrderedPlaceholderEntries(): Array<{ key: string; insertValue: string; previewValue: string }> {
     const placeholders = state.pack?.settings?.placeholders || {};
     const roleValues = getCurrentRolePlaceholderMap(false);
     const mergedValues = getEffectivePlaceholderValues(placeholders, roleValues);
     const baseOrder = ['用户', '角色', '苦主', '黄毛'];
     const allKeys = Object.keys(placeholders);
     const ordered = [...baseOrder.filter((k) => allKeys.includes(k)), ...allKeys.filter((k) => !baseOrder.includes(k))];
-    return ordered.map((key) => ({ key, value: String(mergedValues[key] || key) }));
+    return ordered.map((key) => ({
+      key,
+      insertValue: String(placeholders[key] || key),
+      previewValue: String(mergedValues[key] || placeholders[key] || key),
+    }));
   }
 
   function buildPlaceholderQuickInsertRow(title = '变量快捷'): string {
@@ -3886,10 +4611,12 @@ body {
       const strong = pD.createElement('b');
       strong.textContent = `@${entry.key}`;
       btn.appendChild(strong);
-      btn.title = `插入 {@${entry.key}:${entry.value}}`;
+      btn.title = entry.previewValue !== entry.insertValue
+        ? `插入 {@${entry.key}:${entry.insertValue}}；当前映射预览：${entry.previewValue}`
+        : `插入 {@${entry.key}:${entry.insertValue}}`;
       btn.onclick = (e) => {
         e.preventDefault();
-        insertTextAtCursor(target, `{@${entry.key}:${entry.value}}`);
+        insertTextAtCursor(target, `{@${entry.key}:${entry.insertValue}}`);
       };
       chipsEl.appendChild(btn);
     }
@@ -4319,27 +5046,73 @@ body {
           <div class="fp-settings-body">
             <div class="fp-tab active" data-tab="placeholders">
               <div class="fp-ph-top">
-                <div class="fp-row fp-ph-top-row">
-                  <label>编辑目标</label>
-                  <div class="fp-ph-top-main">
-                    <div class="fp-ph-top-line">
-                      <select data-ph-role-selector></select>
-                      <span class="fp-ph-auto-spacer">自动选择</span>
+                <div class="fp-ph-top-layout">
+                  <aside class="fp-ph-context-card">
+                    <div class="fp-ph-context-head">
+                      <div class="fp-ph-context-title-wrap">
+                        <span class="fp-ph-context-title-dot"></span>
+                        <div>
+                          <div class="fp-ph-context-caption">Context</div>
+                          <div class="fp-ph-context-title">当前上下文</div>
+                        </div>
+                      </div>
+                      <div class="fp-ph-context-badge">已同步</div>
                     </div>
-                    <div data-ph-context class="fp-ph-meta"></div>
-                  </div>
-                </div>
-                <div class="fp-row fp-ph-top-row">
-                  <label>映射来源</label>
-                  <div class="fp-ph-top-main">
-                    <div class="fp-ph-top-line">
-                    <div class="fp-worldbook-select-wrap">
-                      <select data-worldbook-selector></select>
-                      <span class="fp-worldbook-chevron">${iconSvg('chevron-down')}</span>
+                    <div class="fp-ph-context-grid">
+                      <div class="fp-ph-context-item">
+                        <div class="fp-ph-context-label">当前角色卡</div>
+                        <div class="fp-ph-context-value" data-ph-current-card></div>
+                        <div class="fp-ph-context-sub" data-ph-current-card-sub></div>
+                      </div>
+                      <div class="fp-ph-context-item">
+                        <div class="fp-ph-context-label">当前编辑目标</div>
+                        <div class="fp-ph-context-value" data-ph-current-edit-target></div>
+                        <div class="fp-ph-context-sub" data-ph-current-edit-target-sub></div>
+                      </div>
+                      <div class="fp-ph-context-item map-overview">
+                        <div class="fp-ph-map-head">
+                          <div class="fp-ph-map-head-main">
+                            <div class="fp-ph-context-label">当前映射</div>
+                            <div class="fp-ph-context-value" data-ph-current-map></div>
+                            <div class="fp-ph-context-sub" data-ph-current-map-sub></div>
+                          </div>
+                          <button type="button" class="fp-ph-map-toggle" data-ph-map-toggle aria-expanded="false">
+                            <span data-ph-map-toggle-label>变量概览</span>
+                            ${iconSvg('chevron-down')}
+                          </button>
+                        </div>
+                        <div class="fp-ph-map-meta" data-ph-map-meta></div>
+                        <div class="fp-ph-map-preview" data-ph-map-preview></div>
+                        <div class="fp-ph-map-detail" data-ph-map-detail>
+                          <div class="fp-ph-map-detail-grid" data-ph-map-detail-grid></div>
+                        </div>
+                      </div>
                     </div>
-                      <button class="fp-btn" data-worldbook-auto>自动选择</button>
+                  </aside>
+                  <div class="fp-ph-top-fields">
+                    <div class="fp-row fp-ph-top-row">
+                      <label>编辑目标</label>
+                      <div class="fp-ph-top-main">
+                        <div class="fp-ph-top-line">
+                          <select data-ph-role-selector></select>
+                          <span class="fp-ph-auto-spacer">自动选择</span>
+                        </div>
+                        <div data-ph-context class="fp-ph-meta"></div>
+                      </div>
                     </div>
-                    <div data-worldbook-status class="fp-ph-meta"></div>
+                    <div class="fp-row fp-ph-top-row">
+                      <label>映射来源</label>
+                      <div class="fp-ph-top-main">
+                        <div class="fp-ph-top-line">
+                        <div class="fp-worldbook-select-wrap">
+                          <select data-worldbook-selector></select>
+                          <span class="fp-worldbook-chevron">${iconSvg('chevron-down')}</span>
+                        </div>
+                          <button class="fp-btn" data-worldbook-auto>自动选择</button>
+                        </div>
+                        <div data-worldbook-status class="fp-ph-meta"></div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -4374,7 +5147,7 @@ body {
                   ${Object.keys(THEME_NAMES).map(k => `<option value="${k}" ${currentTheme === k ? 'selected' : ''}>${THEME_NAMES[k]}</option>`).join('')}
                 </select>
               </div>
-              <div class="fp-row" style="align-items:flex-start"><label>自定义CSS</label><textarea data-custom-css placeholder="输入自定义CSS样式...">${state.pack!.settings.ui.customCSS || ''}</textarea></div>
+              <div class="fp-row" style="align-items:flex-start"><label>自定义CSS</label><textarea class="fp-textarea" data-custom-css placeholder="输入自定义CSS样式...">${state.pack!.settings.ui.customCSS || ''}</textarea></div>
               <div class="fp-row" style="gap:8px;justify-content:flex-end">
                 <button class="fp-btn" data-export-theme>导出主题</button>
                 <button class="fp-btn" data-import-theme>导入主题</button>
@@ -4395,25 +5168,27 @@ body {
             </div>
             <div class="fp-tab" data-tab="qr-llm-api">
               <div style="font-size:12px;color:var(--qr-text-2);margin-bottom:8px">OpenAI兼容配置（通过酒馆后端代理调用，敏感信息不会随导出导出）</div>
-              <div class="fp-row"><label>API URL</label><input data-qr-api-url value="${localQrLlmSecret.url || ''}" placeholder="如：https://api.openai.com/v1" /></div>
-              <div class="fp-row"><label>API Key</label><input data-qr-api-key type="password" value="${localQrLlmSecret.apiKey || ''}" placeholder="sk-..." /></div>
-              <div class="fp-row"><label>模型列表</label>
+              <div class="fp-row fp-qr-api-row"><label>API URL</label><input data-qr-api-url value="${localQrLlmSecret.url || ''}" placeholder="如：https://api.openai.com/v1" /></div>
+              <div class="fp-row fp-qr-api-row"><label>API Key</label><input data-qr-api-key type="password" value="${localQrLlmSecret.apiKey || ''}" placeholder="sk-..." /></div>
+              <div class="fp-row fp-qr-api-row"><label>模型列表</label>
                 <div style="display:flex;gap:6px;flex:1">
-                  <button class="fp-btn" data-qr-load-models style="flex:0 0 auto">拉取模型列表</button>
                   <select data-qr-model-select style="flex:1;min-width:0"></select>
+                  <button class="fp-btn" data-qr-load-models style="flex:0 0 auto">拉取模型列表</button>
                 </div>
               </div>
-              <div class="fp-row"><label>模型ID</label><input data-qr-model-manual value="${localQrLlmSecret.manualModelId || localQrLlmSecret.model || ''}" placeholder="可手动填写模型ID" /></div>
-              <div class="fp-row fp-row-block"><label>附加参数</label>
+              <div class="fp-row fp-qr-api-row"><label>模型ID</label><input data-qr-model-manual value="${localQrLlmSecret.manualModelId || localQrLlmSecret.model || ''}" placeholder="可手动填写模型ID" /></div>
+              <div class="fp-row fp-row-block fp-qr-api-row"><label>附加参数</label>
                 <div style="flex:1;display:flex;flex-direction:column;gap:6px">
-                  <textarea data-qr-extra-body-params style="min-height:140px" placeholder="可选，附加到请求体。支持JSON或简易YAML。例如：&#10;reasoning:&#10;  enabled: false&#10;  effort: none&#10;thinking:&#10;  type: disabled"></textarea>
-                  <div style="display:flex;justify-content:flex-end;gap:8px">
+                  <textarea class="fp-textarea" data-qr-extra-body-params placeholder="可选，附加到请求体。支持JSON或简易YAML。例如：&#10;reasoning:&#10;  enabled: false&#10;  effort: none&#10;thinking:&#10;  type: disabled"></textarea>
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;white-space:nowrap">
+                    <div style="font-size:12px;color:var(--qr-text-2);overflow:hidden;text-overflow:ellipsis">用于传入供应商自定义参数（不参与导出）。</div>
+                    <div style="display:flex;align-items:center;gap:8px;flex:0 0 auto">
                     <button class="fp-btn" data-qr-fill-disable-thinking>一键禁用思考</button>
+                    <button class="fp-btn" data-qr-test-connect>测试连通性</button>
+                    </div>
                   </div>
-                  <div style="font-size:12px;color:var(--qr-text-2)">用于传入供应商自定义参数（不参与导出）。</div>
                 </div>
               </div>
-              <div class="fp-row" style="justify-content:flex-end"><button class="fp-btn" data-qr-test-connect>测试连通性</button></div>
               <div data-qr-api-status style="font-size:12px;color:var(--qr-text-2);line-height:1.5">状态：待配置</div>
               <div class="fp-qr-section" style="margin-top:10px">
                 <div class="fp-qr-section-title">生成参数</div>
@@ -4439,9 +5214,9 @@ body {
                 <div class="fp-qr-section">
                   <div class="fp-qr-bar">
                     <select data-qr-preset-select class="fp-select"></select>
-                    <button class="fp-btn" data-qr-preset-new>${iconSvg('add')}新建</button>
-                    <button class="fp-btn" data-qr-preset-delete>删除</button>
-                    <button class="fp-btn" data-qr-preset-reset-default>重置默认</button>
+                    <button class="fp-btn fp-qr-preset-action" data-qr-preset-new>新增</button>
+                    <button class="fp-btn fp-qr-preset-action" data-qr-preset-delete>删除</button>
+                    <button class="fp-btn fp-qr-preset-action" data-qr-preset-reset-default>重置</button>
                   </div>
                 </div>
 
@@ -4699,7 +5474,6 @@ body {
         marker?: boolean;
         forbidOverrides?: boolean;
       }> = [];
-      let draggingSegIndex: number | null = null;
 
       const compileDraftToFields = () => {
         compileQrLlmPreset({
@@ -4724,14 +5498,19 @@ body {
         localPromptGroupDraft.forEach((seg, idx) => {
           const row = pD.createElement('div');
           row.className = 'fp-qr-seg-row';
-          row.setAttribute('draggable', 'true');
           row.setAttribute('data-qr-seg-row', String(idx));
           row.innerHTML = `
+            <button class="fp-qr-drag-handle" data-qr-seg-drag-handle="${idx}" title="拖拽排序" aria-label="拖拽排序">
+              <span class="fp-qr-drag-handle-dots" aria-hidden="true">
+                <span></span><span></span>
+                <span></span><span></span>
+                <span></span><span></span>
+              </span>
+            </button>
             <div class="fp-qr-seg-main">
               <div class="fp-qr-seg-note">${esc(seg.name || seg.note || `${roleText(seg.role)} ${idx + 1}`)}</div>
             </div>
             <div class="fp-qr-seg-ops">
-              <button class="fp-btn icon-only fp-qr-drag-handle" data-qr-seg-drag-handle="${idx}" title="拖拽排序">${iconSvg('more-v')}</button>
               <button class="fp-btn icon-only" data-qr-seg-edit="${idx}" title="编辑">${iconSvg('pencil')}</button>
               <button class="fp-btn icon-only" data-qr-seg-add-after="${idx}" title="新增">${iconSvg('add')}</button>
               <button class="fp-btn icon-only" data-qr-seg-up="${idx}" title="上移">${iconSvg('chevron-up')}</button>
@@ -4776,7 +5555,7 @@ body {
               </div>
               <div class="fp-row"><label>启用</label><label class="fp-toggle" style="width:auto"><input type="checkbox" data-seg-enabled ${safeEnabled ? 'checked' : ''}/><span class="fp-toggle-track"><span class="fp-toggle-thumb"></span></span><span class="fp-toggle-text">此条目参与生成</span></label></div>
             </div>
-            <div class="fp-row" style="align-items:flex-start"><label>提示词</label><textarea data-seg-content placeholder="输入该段的完整提示词"></textarea></div>
+            <div class="fp-seg-edit-row"><label>提示词</label><textarea class="fp-textarea" data-seg-content placeholder="输入该段的完整提示词"></textarea></div>
             <div class="fp-actions">
               <button data-close>取消</button>
               <button class="primary" data-save>保存</button>
@@ -5211,54 +5990,67 @@ seed: -1`;
         };
       }
       if (qrPromptGroupListEl) {
-        qrPromptGroupListEl.ondragstart = (ev) => {
+        qrPromptGroupListEl.onpointerdown = (ev) => {
           const target = ev.target as HTMLElement | null;
           const handle = target?.closest('[data-qr-seg-drag-handle]') as HTMLElement | null;
-          if (!handle) {
-            ev.preventDefault();
-            return;
-          }
-          const row = target?.closest('[data-qr-seg-row]') as HTMLElement | null;
+          if (!handle || ev.button !== 0) return;
+          const row = handle.closest('[data-qr-seg-row]') as HTMLElement | null;
           if (!row) return;
           const idx = Number(row.getAttribute('data-qr-seg-row'));
           if (!Number.isInteger(idx) || idx < 0 || idx >= localPromptGroupDraft.length) return;
-          draggingSegIndex = idx;
-          row.style.opacity = '0.55';
-          if (ev.dataTransfer) {
-            ev.dataTransfer.effectAllowed = 'move';
-            ev.dataTransfer.setData('text/plain', String(idx));
-          }
-        };
-        qrPromptGroupListEl.ondragover = (ev) => {
-          if (draggingSegIndex === null) return;
           ev.preventDefault();
-          if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
-        };
-        qrPromptGroupListEl.ondrop = (ev) => {
-          if (draggingSegIndex === null) return;
-          ev.preventDefault();
-          const target = ev.target as HTMLElement | null;
-          const row = target?.closest('[data-qr-seg-row]') as HTMLElement | null;
-          if (!row) return;
-          const rawTo = Number(row.getAttribute('data-qr-seg-row'));
-          if (!Number.isInteger(rawTo) || rawTo < 0 || rawTo >= localPromptGroupDraft.length) return;
-          const from = draggingSegIndex;
-          let to = rawTo;
-          const rect = row.getBoundingClientRect();
-          if (ev.clientY > rect.top + rect.height / 2) to = rawTo + 1;
-          if (from < to) to -= 1;
-          if (to < 0) to = 0;
-          if (to >= localPromptGroupDraft.length) to = localPromptGroupDraft.length - 1;
-          if (from === to) return;
-          const moved = localPromptGroupDraft.splice(from, 1)[0];
-          localPromptGroupDraft.splice(to, 0, moved);
-          renderPromptGroupEditor();
-          compileDraftToFields();
-        };
-        qrPromptGroupListEl.ondragend = () => {
-          draggingSegIndex = null;
-          qrPromptGroupListEl.querySelectorAll<HTMLElement>('[data-qr-seg-row]').forEach((el) => {
-            el.style.opacity = '';
+          if (isClickSuppressed()) return;
+          runSnapshotReorderDrag<HTMLElement>({
+            startEvent: ev,
+            sourceEl: row,
+            containerEl: qrPromptGroupListEl,
+            scrollHost: qrPromptGroupListEl,
+            createPlaceholder: () => {
+              const placeholder = row.cloneNode(true) as HTMLElement;
+              placeholder.classList.remove('is-dragging');
+              placeholder.classList.add('fp-qr-seg-placeholder');
+              placeholder.removeAttribute('data-qr-seg-row');
+              placeholder.querySelectorAll('button').forEach((btn) => {
+                btn.setAttribute('tabindex', '-1');
+                btn.setAttribute('aria-hidden', 'true');
+              });
+              return placeholder;
+            },
+            getSnapshotElements: () => Array.from(qrPromptGroupListEl.querySelectorAll('[data-qr-seg-row]'))
+              .filter((el) => el !== row) as HTMLElement[],
+            resolvePlacement: ({ event, snapshots }) => {
+              for (const snap of snapshots) {
+                if (event.clientY < snap.rect.centerY) {
+                  return {
+                    dropIndex: snap.index,
+                    placementKey: `seg:${snap.index}`,
+                    insertBeforeEl: snap.el,
+                  };
+                }
+              }
+              return {
+                dropIndex: snapshots.length,
+                placementKey: 'seg:end',
+              };
+            },
+            onDragStart: () => {
+              row.classList.add('is-dragging');
+            },
+            onCleanup: () => {
+              row.classList.remove('is-dragging');
+            },
+            onDrop: (finalDropIndex, didDrag) => {
+              if (!didDrag) return;
+              let toIndex = finalDropIndex;
+              if (toIndex > idx) toIndex -= 1;
+              if (toIndex < 0) toIndex = 0;
+              if (toIndex >= localPromptGroupDraft.length) toIndex = localPromptGroupDraft.length - 1;
+              if (toIndex === idx) return;
+              const [moved] = localPromptGroupDraft.splice(idx, 1);
+              localPromptGroupDraft.splice(toIndex, 0, moved);
+              renderPromptGroupEditor();
+              compileDraftToFields();
+            },
           });
         };
         qrPromptGroupListEl.onclick = (ev) => {
@@ -5554,6 +6346,18 @@ seed: -1`;
       };
 
       const contextEl = card.querySelector('[data-ph-context]') as HTMLElement | null;
+      const currentCardEl = card.querySelector('[data-ph-current-card]') as HTMLElement | null;
+      const currentCardSubEl = card.querySelector('[data-ph-current-card-sub]') as HTMLElement | null;
+      const currentEditTargetEl = card.querySelector('[data-ph-current-edit-target]') as HTMLElement | null;
+      const currentEditTargetSubEl = card.querySelector('[data-ph-current-edit-target-sub]') as HTMLElement | null;
+      const currentMapEl = card.querySelector('[data-ph-current-map]') as HTMLElement | null;
+      const currentMapSubEl = card.querySelector('[data-ph-current-map-sub]') as HTMLElement | null;
+      const currentMapMetaEl = card.querySelector('[data-ph-map-meta]') as HTMLElement | null;
+      const currentMapPreviewEl = card.querySelector('[data-ph-map-preview]') as HTMLElement | null;
+      const currentMapDetailEl = card.querySelector('[data-ph-map-detail]') as HTMLElement | null;
+      const currentMapDetailGridEl = card.querySelector('[data-ph-map-detail-grid]') as HTMLElement | null;
+      const currentMapToggleBtn = card.querySelector('[data-ph-map-toggle]') as HTMLButtonElement | null;
+      const currentMapToggleLabelEl = card.querySelector('[data-ph-map-toggle-label]') as HTMLElement | null;
       const roleSelectorEl = card.querySelector('[data-ph-role-selector]') as HTMLSelectElement | null;
       const fixedListEl = card.querySelector('[data-fixed-ph-list]') as HTMLElement | null;
       const customListEl = card.querySelector('[data-custom-ph-list]') as HTMLElement | null;
@@ -5608,14 +6412,132 @@ seed: -1`;
         else delete localAllRoleMaps[selectedRoleOption];
       };
 
+      const getRoleDisplayName = (roleId: string): string => {
+        return String(localAllRoleMeta[roleId]?.name || (roleId === state.activeCharacterId ? state.activeCharacterName : '') || roleId);
+      };
+      let mapOverviewExpanded = false;
+
+      const buildMapMetaPill = (text: string, soft = false) => {
+        return `<span class="fp-ph-map-meta-pill${soft ? ' is-soft' : ''}">${escapeHtml(text)}</span>`;
+      };
+
+      const renderCurrentMapOverview = (activeMapRoleId: string, selectedValues: Record<string, string>) => {
+        const preferredKeys = [...rows, ...Object.keys(placeholders).filter((k) => !rows.includes(k))];
+        const uniqueKeys = [...new Set(preferredKeys.filter(Boolean))];
+        const pairs = uniqueKeys.map((key) => ({
+          key,
+          value: String(selectedValues[key] || placeholders[key] || key),
+        }));
+        if (currentMapMetaEl) {
+          const meta = [
+            buildMapMetaPill(activeMapRoleId === ROLE_DEFAULT_OPTION ? '默认映射' : '角色映射'),
+            buildMapMetaPill(`${pairs.length} 个变量`, true),
+          ];
+          if (selectedRoleOption === activeMapRoleId) meta.push(buildMapMetaPill('编辑中'));
+          currentMapMetaEl.innerHTML = meta.join('');
+        }
+        if (currentMapPreviewEl) {
+          const summaryPairs = pairs.slice(0, 3);
+          const overflowCount = Math.max(0, pairs.length - summaryPairs.length);
+          currentMapPreviewEl.innerHTML = [
+            ...summaryPairs.map((pair) => `
+            <span class="fp-ph-map-chip" title="${escapeHtml(pair.key)} = ${escapeHtml(pair.value)}">
+              <span class="fp-ph-map-chip-key">${escapeHtml(pair.key)}</span>
+              <span class="fp-ph-map-chip-sep"></span>
+              <span class="fp-ph-map-chip-val">${escapeHtml(pair.value)}</span>
+            </span>
+          `),
+            overflowCount > 0
+              ? `<span class="fp-ph-map-chip is-overflow" title="还有 ${overflowCount} 个变量">+${overflowCount}</span>`
+              : '',
+          ].join('');
+        }
+        if (currentMapDetailGridEl) {
+          currentMapDetailGridEl.innerHTML = pairs.map((pair) => `
+            <div class="fp-ph-map-detail-row" title="${escapeHtml(pair.key)} = ${escapeHtml(pair.value)}">
+              <span class="fp-ph-map-detail-key">${escapeHtml(pair.key)}</span>
+              <span class="fp-ph-map-detail-sep"></span>
+              <span class="fp-ph-map-detail-val">${escapeHtml(pair.value)}</span>
+            </div>
+          `).join('');
+        }
+        if (currentMapDetailEl) currentMapDetailEl.classList.toggle('is-open', mapOverviewExpanded);
+        if (currentMapToggleBtn) {
+          currentMapToggleBtn.hidden = pairs.length <= 3;
+          currentMapToggleBtn.setAttribute('aria-expanded', mapOverviewExpanded ? 'true' : 'false');
+          if (currentMapToggleLabelEl) currentMapToggleLabelEl.textContent = mapOverviewExpanded ? '收起' : '展开';
+          currentMapToggleBtn.title = activeMapRoleId === ROLE_DEFAULT_OPTION ? '查看默认映射概览' : '查看当前角色映射概览';
+        }
+      };
+
       const refreshContextLabel = () => {
         if (!contextEl) return;
         if (selectedRoleOption === ROLE_DEFAULT_OPTION) {
           contextEl.textContent = '编辑目标：默认占位符值';
           return;
         }
-        const displayName = String(localAllRoleMeta[selectedRoleOption]?.name || (selectedRoleOption === state.activeCharacterId ? state.activeCharacterName : '') || selectedRoleOption);
+        const displayName = getRoleDisplayName(selectedRoleOption);
         contextEl.textContent = `编辑目标：${displayName}（${selectedRoleOption}）`;
+      };
+
+      const refreshContextPanel = () => {
+        const activeMapRoleId = !state.activeIsGroupChat && state.activeCharacterId ? state.activeCharacterId : ROLE_DEFAULT_OPTION;
+        const activeMapDisplayName = activeMapRoleId === ROLE_DEFAULT_OPTION ? '默认占位符 MAP' : getRoleDisplayName(activeMapRoleId);
+        const editingDisplayName = selectedRoleOption === ROLE_DEFAULT_OPTION ? '默认占位符 MAP' : getRoleDisplayName(selectedRoleOption);
+        const activeMapValues = activeMapRoleId === ROLE_DEFAULT_OPTION
+          ? getEffectivePlaceholderValues(placeholders, null)
+          : getEffectivePlaceholderValues(placeholders, state.pack?.settings?.placeholderRoleMaps?.byCharacterId?.[activeMapRoleId] || null);
+        if (currentCardEl) {
+          if (state.activeIsGroupChat) {
+            currentCardEl.textContent = '群聊模式';
+            currentCardEl.classList.remove('is-placeholder');
+          } else if (state.activeCharacterId) {
+            currentCardEl.textContent = getRoleDisplayName(state.activeCharacterId);
+            currentCardEl.classList.remove('is-placeholder');
+          } else {
+            currentCardEl.textContent = '未识别到当前角色';
+            currentCardEl.classList.add('is-placeholder');
+          }
+        }
+        if (currentCardSubEl) {
+          if (state.activeIsGroupChat) {
+            currentCardSubEl.textContent = '群聊模式';
+            currentCardSubEl.classList.remove('is-placeholder');
+          } else if (state.activeCharacterId) {
+            currentCardSubEl.textContent = state.activeCharacterId;
+            currentCardSubEl.classList.remove('is-placeholder');
+          } else {
+            currentCardSubEl.textContent = '等待检测当前酒馆角色卡。';
+            currentCardSubEl.classList.add('is-placeholder');
+          }
+        }
+        if (currentEditTargetEl) {
+          currentEditTargetEl.textContent = editingDisplayName;
+          currentEditTargetEl.classList.remove('is-placeholder');
+        }
+        if (currentEditTargetSubEl) {
+          currentEditTargetSubEl.textContent = selectedRoleOption === ROLE_DEFAULT_OPTION
+            ? '默认占位符'
+            : `${selectedRoleOption}${selectedRoleOption === state.activeCharacterId ? ' · 当前角色' : ' · 单独编辑'}`;
+          currentEditTargetSubEl.classList.remove('is-placeholder');
+        }
+        if (currentMapEl) {
+          currentMapEl.textContent = activeMapDisplayName;
+          currentMapEl.classList.remove('is-placeholder');
+        }
+        if (currentMapSubEl) {
+          if (activeMapRoleId === ROLE_DEFAULT_OPTION) {
+            currentMapSubEl.textContent = selectedRoleOption === ROLE_DEFAULT_OPTION
+              ? '当前会话读取默认值'
+              : `当前会话读取默认值 · 正在编辑 ${editingDisplayName}`;
+          } else {
+            currentMapSubEl.textContent = selectedRoleOption === activeMapRoleId
+              ? `${activeMapRoleId} · 当前会话使用中`
+              : `${activeMapRoleId} · 会话使用中 / 编辑目标：${editingDisplayName}`;
+          }
+          currentMapSubEl.classList.remove('is-placeholder');
+        }
+        renderCurrentMapOverview(activeMapRoleId, activeMapValues);
       };
 
       if (selectedRoleOption !== ROLE_DEFAULT_OPTION) {
@@ -5629,6 +6551,13 @@ seed: -1`;
       loadRoleValuesBySelection();
       renderRoleSelector();
       refreshContextLabel();
+      refreshContextPanel();
+      if (currentMapToggleBtn) {
+        currentMapToggleBtn.onclick = () => {
+          mapOverviewExpanded = !mapOverviewExpanded;
+          refreshContextPanel();
+        };
+      }
 
       const getValidSelectedValues = (selectedValue: string): string[] => {
         const selectedValues = splitMultiValue(selectedValue);
@@ -5828,6 +6757,7 @@ seed: -1`;
           loadRoleValuesBySelection();
           renderRoleSelector();
           refreshContextLabel();
+          refreshContextPanel();
           renderFixedPhList();
           renderCustomPhList();
         };
@@ -5929,6 +6859,7 @@ seed: -1`;
           if (nextKey !== lastRoleWatchKey) {
             lastRoleWatchKey = nextKey;
             renderRoleSelector();
+            refreshContextPanel();
             allWorldbookNames = getAllWorldbookNamesSafe();
             autoSelectedWorldbookNames = getCurrentCharacterBoundWorldbookNames();
             selectedWorldbookName = autoSelectedWorldbookNames[0] || '';
@@ -6247,15 +7178,16 @@ seed: -1`;
         (state.currentCategoryId && getCategoryById(state.currentCategoryId) ? state.currentCategoryId : null) ||
         (cats[0]?.id || null)
       );
+      const modalTitle = item ? '✏️ 编辑条目' : '✚ 新增条目';
 
       card.innerHTML = `
-        <div class="fp-modal-title">✏️ 编辑条目</div>
+        <div class="fp-modal-title">${modalTitle}</div>
         <div class="fp-edit-scroll">
         <div class="fp-row"><label>名称</label><input data-name value="${escapeHtml(item ? item.name : '')}" /></div>
         <div class="fp-row fp-row-block">
           <label>执行内容</label>
           <div class="fp-content-editor">
-            <textarea data-content>${escapeHtml(item ? item.content : '')}</textarea>
+            <textarea class="fp-textarea" data-content>${escapeHtml(item ? item.content : '')}</textarea>
             <button type="button" class="fp-qr-undo-btn" data-qr-undo style="display:none" title="撤回生成">${iconSvg('undo')}</button>
             <button type="button" class="fp-qr-gen-btn" data-qr-generate title="AI扩写">${iconSvg('sparkles')}</button>
           </div>
@@ -6292,6 +7224,7 @@ seed: -1`;
       mountPlaceholderQuickInsert(card, { chipsSelector: '[data-ph-chips]', targetSelector: '[data-content]' });
 
       const contentEl = card.querySelector('[data-content]') as HTMLTextAreaElement | null;
+      const contentEditorEl = card.querySelector('.fp-content-editor') as HTMLElement | null;
       const generateBtn = card.querySelector('[data-qr-generate]') as HTMLButtonElement | null;
       const undoBtn = card.querySelector('[data-qr-undo]') as HTMLButtonElement | null;
       const statusEl = card.querySelector('[data-qr-gen-status]') as HTMLElement | null;
@@ -6306,6 +7239,15 @@ seed: -1`;
           generateBtn.classList.toggle('is-loading', generating);
           generateBtn.title = generating ? '生成中...' : 'AI扩写';
         }
+      };
+      const setContentGeneratingUi = (mode: 'idle' | 'awaiting' | 'writing') => {
+        if (!contentEl || !contentEditorEl) return;
+        const generating = mode !== 'idle';
+        contentEl.readOnly = generating;
+        contentEl.classList.toggle('is-generate-readonly', generating);
+        contentEditorEl.classList.toggle('is-generating', generating);
+        contentEditorEl.classList.toggle('is-generate-awaiting', mode === 'awaiting');
+        contentEditorEl.classList.toggle('is-generate-writing', mode === 'writing');
       };
 
       if (undoBtn) {
@@ -6342,13 +7284,11 @@ seed: -1`;
           state.editGenerateState.abortController = ac;
           state.editGenerateState.isGenerating = true;
           state.editGenerateState.lastDraftBeforeGenerate = contentEl.value;
+          let hasAppliedGeneratedText = false;
           setGeneratingUi(true);
+          setContentGeneratingUi('awaiting');
           setGenerateStatus('正在生成扩写内容...');
-
           const streamEnabled = !!state.pack.settings.qrLlm.enabledStream;
-          if (streamEnabled) {
-            contentEl.value = '';
-          }
 
           try {
             const result = await generateQrExpandedContent(draft, {
@@ -6357,6 +7297,10 @@ seed: -1`;
                 ? (text) => {
                     if (!contentEl) return;
                     if (state.editGenerateState.activeRequestId !== reqId) return;
+                    if (!hasAppliedGeneratedText) {
+                      hasAppliedGeneratedText = true;
+                      setContentGeneratingUi('writing');
+                    }
                     contentEl.value = text;
                   }
                 : undefined,
@@ -6364,6 +7308,10 @@ seed: -1`;
             if (state.editGenerateState.activeRequestId !== reqId) return;
             const finalText = String(result || '').trim();
             if (!finalText) throw new Error('生成结果为空');
+            if (!hasAppliedGeneratedText) {
+              hasAppliedGeneratedText = true;
+              setContentGeneratingUi('writing');
+            }
             contentEl.value = finalText;
             state.editGenerateState.lastGeneratedText = finalText;
             if (undoBtn) undoBtn.style.display = '';
@@ -6373,10 +7321,11 @@ seed: -1`;
             if (state.editGenerateState.activeRequestId !== reqId) return;
             const msg = err instanceof Error ? err.message : String(err);
             if (String(msg).toLowerCase().includes('aborted')) {
+              contentEl.value = state.editGenerateState.lastDraftBeforeGenerate || contentEl.value;
               setGenerateStatus('已取消生成', 'warn');
               toast('已取消生成');
             } else {
-              if (streamEnabled && state.editGenerateState.lastDraftBeforeGenerate) {
+              if (state.editGenerateState.lastDraftBeforeGenerate) {
                 contentEl.value = state.editGenerateState.lastDraftBeforeGenerate;
               }
               setGenerateStatus(`生成失败: ${msg}`, 'error');
@@ -6387,6 +7336,7 @@ seed: -1`;
             state.editGenerateState.isGenerating = false;
             state.editGenerateState.abortController = null;
             setGeneratingUi(false);
+            setContentGeneratingUi('idle');
           }
         };
       }
@@ -6461,7 +7411,7 @@ seed: -1`;
         <div class="fp-modal-title">✨ 快速添加自定义</div>
         <div class="fp-edit-scroll">
         <div class="fp-row"><label>名称</label><input data-name value="${escapeHtml(defaultName)}" placeholder="如：转场总结" /></div>
-        <div class="fp-row"><label>执行内容</label><textarea data-content placeholder="输入要发送的内容..."></textarea></div>
+        <div class="fp-row"><label>执行内容</label><textarea class="fp-textarea" data-content placeholder="输入要发送的内容..."></textarea></div>
         <div class="fp-row"><label>执行方式</label>
           <select data-mode>
             <option value="append" ${state.pack!.settings.defaults.mode === 'append' ? 'selected' : ''}>追加到输入框</option>
@@ -7227,7 +8177,7 @@ seed: -1`;
       card.className = 'fp-modal-card';
       card.innerHTML = `
         <div class="fp-modal-title">📤 导出当前分类子树</div>
-        <div class="fp-row"><label>JSON</label><textarea data-json></textarea></div>
+        <div class="fp-row"><label>JSON</label><textarea class="fp-textarea" data-json></textarea></div>
         <div class="fp-actions">
           <button class="primary" data-download>下载</button>
           <button data-close>关闭</button>
@@ -7552,11 +8502,14 @@ seed: -1`;
 
       const grid = pD.createElement('div');
       grid.className = 'fp-grid';
+      grid.dataset.groupId = g.groupId;
 
       for (const item of g.items) {
         const card = pD.createElement('div');
         card.className = 'fp-card';
         card.style.cursor = 'pointer';
+        card.dataset.itemId = item.id;
+        card.dataset.itemCategory = item.categoryId || '';
         const excerpt = truncateContent(item.content, 80);
         const modeLabel = item.mode === 'inject' ? '注入' : '追加';
         card.innerHTML = `
@@ -7603,7 +8556,10 @@ seed: -1`;
           state.longPressTimer = null;
         });
 
-        attachPointerCategoryDropDrag(card, { type: 'item', id: item.id });
+        attachPointerItemCardDrag(card, item, grid, mainScroll, () => {
+          const tree = pD.querySelector('.fp-tree') as HTMLElement | null;
+          if (tree) renderTree(tree, renderWorkbench);
+        });
 
         grid.appendChild(card);
       }
@@ -8499,7 +9455,7 @@ seed: -1`;
       }, 0);
     }
     loadQrLlmSecretConfig();
-    syncActiveCharacterMapping({ silent: true, force: true });
+    handleActiveCharacterContextChanged({ silent: true, force: true });
 
     const roots = state.pack.categories.filter((c) => c.parentId === null).sort((a, b) => a.order - b.order);
     if (!state.currentCategoryId) {
@@ -8544,17 +9500,16 @@ seed: -1`;
     }
     try {
       const onChatChanged = () => {
-        const prevKey = state.activeCharacterSwitchKey;
-        syncActiveCharacterMapping();
-        if (prevKey !== state.activeCharacterSwitchKey) persistPack();
+        handleActiveCharacterContextChanged({ rerender: true });
       };
       const onCharacterLoaded = () => {
-        const prevKey = state.activeCharacterSwitchKey;
-        syncActiveCharacterMapping();
-        if (prevKey !== state.activeCharacterSwitchKey) persistPack();
+        handleActiveCharacterContextChanged({ rerender: true });
       };
       eventOn(tavern_events.CHAT_CHANGED, onChatChanged);
       eventOn(tavern_events.CHARACTER_PAGE_LOADED, onCharacterLoaded);
+      const roleSyncTimer = pW.setInterval(() => {
+        handleActiveCharacterContextChanged({ silent: true, rerender: true });
+      }, 900);
       cleanups.push(() => {
         try {
           const offFn = (globalThis as unknown as { eventOff?: (name: unknown, handler: unknown) => void }).eventOff;
@@ -8563,6 +9518,7 @@ seed: -1`;
             offFn(tavern_events.CHARACTER_PAGE_LOADED, onCharacterLoaded);
           }
         } catch (e) {}
+        try { pW.clearInterval(roleSyncTimer); } catch (e) {}
       });
     } catch (e) {
       logError('角色切换监听注册失败', String(e));
