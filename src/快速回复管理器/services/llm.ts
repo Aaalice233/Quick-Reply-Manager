@@ -852,7 +852,13 @@ export async function fetchQrLlmModels(secret: QrLlmSecretConfig): Promise<strin
     }
   }
 
-  throw new Error(`状态检查失败（已尝试: ${candidates.join(' , ')}）${errors.length ? ` | ${errors[0]}` : ''}`);
+  const errorSummary = errors.length
+    ? errors
+        .slice(0, 3)
+        .map((e, i) => `[${i + 1}] ${e.slice(0, 200)}`)
+        .join('; ')
+    : '';
+  throw new Error(`状态检查失败（已尝试: ${candidates.join(' , ')}）${errorSummary ? ` | ${errorSummary}` : ''}`);
 }
 
 // ============================================================================
@@ -948,7 +954,13 @@ export async function callQrLlmGenerate(
       }
 
       if (!opts.stream || !res.body) {
-        const data = await res.json();
+        let data: unknown;
+        try {
+          data = await res.json();
+        } catch (e) {
+          pushDebugLog('非流式解析错误', `JSON解析失败: ${String(e)}`);
+          throw new Error(`响应JSON解析失败: ${String(e)}`);
+        }
         const text = extractContentFromGenerateJson(data);
         if (!text) throw new Error('响应中未找到可用文本');
         pushDebugLog('AI返回（非流式）', summarizeLlmOutputForLog(text));
@@ -960,6 +972,8 @@ export async function callQrLlmGenerate(
       let buffer = '';
       let out = '';
       let sawSse = false;
+      let parseErrors = 0;
+      const MAX_PARSE_ERRORS = 10;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -986,9 +1000,16 @@ export async function callQrLlmGenerate(
               opts.onDelta?.(out);
             }
           } catch (e) {
-            // 有些后端可能混入非 JSON 心跳，忽略即可
+            parseErrors++;
+            if (parseErrors <= MAX_PARSE_ERRORS) {
+              pushDebugLog('流式解析警告', `非JSON数据被忽略 (${parseErrors})`);
+            }
           }
         }
+      }
+
+      if (!out && parseErrors > 0) {
+        pushDebugLog('流式响应警告', `输出为空，解析错误次数: ${parseErrors}`);
       }
 
       if (out) {
@@ -1219,4 +1240,25 @@ export async function testQrLlmConnection(secret: QrLlmSecretConfig, modelOverri
     .toLowerCase();
   if (normalized === 'ok' || normalized.startsWith('ok')) return 'ok';
   throw new Error(`测试返回非ok: ${normalized.slice(0, 30) || 'empty'}`);
+}
+
+/**
+ * 使当前编辑生成失效
+ * @description 中止当前生成请求并重置所有编辑生成状态字段
+ * @param shouldAbort - 是否中止当前abortController，默认为true
+ */
+export function invalidateEditGeneration(shouldAbort = true): void {
+  if (shouldAbort && state.editGenerateState.abortController) {
+    try {
+      state.editGenerateState.abortController.abort();
+    } catch {
+      // 忽略中止过程中的错误
+    }
+  }
+  state.editGenerateState.isGenerating = false;
+  state.editGenerateState.abortController = null;
+  state.editGenerateState.lastDraftBeforeGenerate = '';
+  state.editGenerateState.lastGeneratedText = '';
+  state.editGenerateState.status = '';
+  state.editGenerateState.requestSeq += 1;
 }

@@ -5,6 +5,7 @@
 
 import { state } from '../store';
 import { logError } from './debug';
+import { invalidateEditGeneration } from './llm';
 
 // ============================================================================
 // 全局访问辅助函数
@@ -313,6 +314,9 @@ export function handleActiveCharacterContextChanged(opts?: {
   const prevKey = state.activeCharacterSwitchKey;
   syncActiveCharacterMapping({ silent: opts?.silent, force: opts?.force });
   const changed = prevKey !== state.activeCharacterSwitchKey;
+  if (changed) {
+    invalidateEditGeneration();
+  }
   // 持久化和重新渲染的逻辑会在调用方处理
   return changed;
 }

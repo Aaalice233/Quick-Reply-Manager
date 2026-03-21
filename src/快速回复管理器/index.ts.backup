@@ -1,0 +1,1333 @@
+/**
+ * 快速回复管理器 - 入口文件
+ * @description 主入口，负责初始化、事件绑定和清理
+ */
+
+// ============================================================================
+// 类型导入
+// ============================================================================
+import type { Pack, Category, Item, DragData, AppState } from './types';
+
+// ============================================================================
+// 常量导入
+// ============================================================================
+import {
+  SCRIPT_LABEL,
+  BUTTON_LABEL,
+  STORE_KEY,
+  STYLE_ID,
+  OVERLAY_ID,
+  TOAST_CONTAINER_ID,
+  QR_LLM_SECRET_KEY,
+  DEFAULT_QR_LLM_PRESET_NAME,
+  DEFAULT_QR_LLM_PRESET_VERSION,
+  DATA_VERSION,
+  THEME_NAMES,
+  CONNECTOR_COLOR_NAMES,
+  CONNECTOR_COLOR_HEX,
+  CONNECTOR_ONLY_KEYS,
+} from './constants';
+
+// ============================================================================
+// 状态导入
+// ============================================================================
+import { state, getState, getCurrentPack, getCurrentCategoryId, updatePack, persistPack } from './store';
+
+// ============================================================================
+// 工具函数导入
+// ============================================================================
+import { uid, resolveHostWindow, escapeHtml, getInputValueTrim, asDomElement } from './utils/dom';
+import { deepClone, parsePackUpdatedAtMs, nowIso } from './utils/data';
+import { validateApiUrlOrThrow, mergeAbortSignals } from './utils/validation';
+import { fetchWithTimeout, copyTextRobust } from './utils/network';
+
+// ============================================================================
+// 服务导入
+// ============================================================================
+import { pushDebugLog, logInfo, logError, getDebugLogText } from './services/debug';
+import { loadPack, saveScriptStoreRaw, getScriptStoreRaw, buildDefaultPack } from './services/storage';
+import {
+  buildDefaultQrLlmPresetStore,
+  normalizeQrLlmPresetStore,
+  getDefaultQrLlmSettings,
+  loadQrLlmSecretConfig,
+  saveQrLlmSecretConfig,
+  getQrLlmSecretConfig,
+  fetchQrLlmModels,
+  callQrLlmGenerate,
+  generateQrExpandedContent,
+  testQrLlmConnection,
+} from './services/llm';
+import {
+  resolvePlaceholders,
+  extractPlaceholderTokens,
+  getCurrentRolePlaceholderMap,
+  getEffectivePlaceholderValues,
+  detectCurrentCharacterState,
+} from './services/placeholder';
+import {
+  ThemeData,
+  getCurrentTheme,
+  setTheme,
+  applyThemeToDOM,
+  exportTheme,
+  importTheme,
+  downloadTheme,
+  importThemeFromFile,
+  getAvailableThemes,
+  getThemeDisplayName,
+  isValidTheme,
+  getCustomCSS,
+  setCustomCSS,
+  initTheme,
+} from './services/theme';
+
+// ============================================================================
+// 功能导入
+// ============================================================================
+import {
+  getCategoryById,
+  getItemsByCategory as getCategoryItems,
+  getPath,
+  getChildCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+  moveCategory,
+  reorderCategories,
+  moveCategoryRelative,
+  getCategoryTree,
+  hasChildren,
+  getDescendantIds,
+  CategoryTreeNode,
+} from './features/categories';
+import {
+  getItemById,
+  getItemsByCategory,
+  createItem,
+  updateItem,
+  deleteItem,
+  moveItem,
+  reorderItems,
+  toggleItemFavorite,
+  duplicateItem,
+  insertQrContent,
+} from './features/items';
+import {
+  exportPackToJson,
+  exportPackToJsonSafe,
+  exportPackToFile,
+  exportPackSubtreeToFile,
+  importPackFromJson,
+  importPackFromFile,
+  validatePack,
+  migratePack,
+  collectSubtreeIds,
+  mergePacks,
+  createPackBackup,
+  restorePackFromBackup,
+} from './features/import-export';
+import {
+  getSettings,
+  updateSettings,
+  getUiSettings,
+  updateUiSettings,
+  resetSettings,
+  getDefaultSettings,
+  cloneSettings,
+  cloneUiSettings,
+} from './features/settings';
+
+// ============================================================================
+// UI导入
+// ============================================================================
+import { ensureStyle, applyCustomCSS, removeStyle, refreshStyles } from './ui/styles';
+import {
+  ModalOptions,
+  ModalContentFactory,
+  TopButtonOptions,
+  iconSvg,
+  renderTopButton,
+  createButton,
+  registerModalCloseCallback,
+  clearModalCloseCallbacks,
+  showModal,
+  setToastConfig,
+  resetToastConfig,
+  toast,
+  createCard,
+} from './ui/components';
+import {
+  ensureOverlay,
+  renderPath,
+  renderCategoryTree,
+  renderItemGrid,
+  renderMainContent,
+  renderPreview,
+  renderCompactListContent,
+  renderCompactList,
+  renderToolbar,
+  renderSidebar,
+  enableResizers,
+  renderWorkbench,
+} from './ui/workbench';
+import {
+  PreviewToken,
+  PlaceholderValues,
+  highlightPlaceholders,
+  renderPreviewPanel,
+  updatePreview,
+  renderPlaceholderPreview,
+  refreshPreviewPanel,
+  getPreviewTokens,
+  setPreviewTokens,
+  addPreviewToken,
+  clearPreviewTokens,
+} from './ui/preview';
+import {
+  DragType,
+  DropMode,
+  isClickSuppressed,
+  suppressNextClick,
+  handleDragStart,
+  handleDragOver,
+  handleDrop,
+  handleDragEnd,
+  handleCategoryClick,
+  handleItemClick,
+  handleContextMenu,
+  bindWorkbenchEvents,
+  unbindWorkbenchEvents,
+  addTouchLongPress,
+  currentDragData,
+  cleanupDrag,
+  closeContextMenu,
+} from './ui/events';
+
+// ============================================================================
+// 全局变量
+// ============================================================================
+
+/** 宿主窗口引用 */
+const pW = resolveHostWindow();
+
+/** 宿主文档引用 */
+const pD = pW.document || document;
+
+/** 是否已初始化 */
+let isInitialized = false;
+
+/** 窗口大小变化处理器 */
+let resizeHandler: (() => void) | null = null;
+
+/** 键盘快捷键处理器 */
+let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+
+// ============================================================================
+// 核心功能函数
+// ============================================================================
+
+/**
+ * 检测当前角色信息
+ * @description 更新 state 中的角色相关信息
+ */
+function detectCharacter(): void {
+  const charState = detectCurrentCharacterState();
+  state.activeCharacterId = charState.characterId;
+  state.activeCharacterName = charState.characterName;
+  state.activeIsGroupChat = charState.isGroupChat;
+
+  // 检测角色切换
+  const currentSwitchKey = `${state.activeCharacterId || '__none__'}_${state.activeIsGroupChat ? 'group' : 'solo'}`;
+  if (state.activeCharacterSwitchKey !== '__boot__' && state.activeCharacterSwitchKey !== currentSwitchKey) {
+    logInfo('检测到角色切换', {
+      from: state.activeCharacterSwitchKey,
+      to: currentSwitchKey,
+      name: state.activeCharacterName,
+    });
+  }
+  state.activeCharacterSwitchKey = currentSwitchKey;
+}
+
+/**
+ * 同步预览令牌到输入框
+ * @description 将预览区的内容同步到酒馆的输入框
+ */
+function syncPreviewToInput(): void {
+  if (!state.pack) return;
+
+  const ta = pD.querySelector('#send_textarea') as HTMLTextAreaElement | null;
+  if (!ta) return;
+
+  const tokens = state.pack.uiState.preview.tokens || [];
+  const next = tokens.map(t => String(t.text !== undefined ? t.text : t.label)).join('');
+
+  if (String(ta.value || '') === next) return;
+
+  state.suspendInputSync = true;
+  ta.value = next;
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  state.suspendInputSync = false;
+}
+
+/**
+ * 应用面板尺寸到视口
+ * @description 根据视口大小调整面板尺寸
+ */
+function applyFitPanelSize(): void {
+  if (!state.pack?.uiState?.panelSize) return;
+
+  const vp = {
+    width: Math.max(320, Number(pW?.innerWidth) || 320),
+    height: Math.max(360, Number(pW?.innerHeight) || 360),
+  };
+
+  const width = Math.min(Math.max(320, vp.width - 16), Math.max(320, Math.round(vp.width * 0.86)));
+  const height = Math.min(Math.max(360, vp.height - 16), Math.max(360, Math.round(vp.height * 0.88)));
+
+  state.pack.uiState.panelSize.width = width;
+  state.pack.uiState.panelSize.height = height;
+}
+
+/**
+ * 处理窗口大小变化
+ * @description 防抖处理窗口大小变化，重新渲染界面
+ */
+function handleResize(): void {
+  if (state.resizeRaf) {
+    pW.cancelAnimationFrame(state.resizeRaf);
+  }
+
+  state.resizeRaf = pW.requestAnimationFrame(() => {
+    state.resizeRaf = null;
+    applyFitPanelSize();
+    persistPack();
+    renderWorkbench();
+  });
+}
+
+/**
+ * 绑定全局事件
+ * @description 绑定窗口大小变化、键盘快捷键等全局事件
+ */
+function bindGlobalEvents(): void {
+  // 窗口大小变化
+  resizeHandler = () => handleResize();
+  pW.addEventListener('resize', resizeHandler);
+
+  // 键盘快捷键
+  keyboardHandler = (e: KeyboardEvent) => {
+    // ESC 关闭右键菜单
+    if (e.key === 'Escape') {
+      closeContextMenu();
+
+      // 如果处于生成状态，取消生成
+      if (state.editGenerateState.isGenerating && state.editGenerateState.abortController) {
+        state.editGenerateState.abortController.abort();
+        state.editGenerateState.isGenerating = false;
+        toast('已取消生成');
+      }
+    }
+
+    // Ctrl/Cmd + S 保存
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault();
+      persistPack({ immediate: true });
+      toast('已保存');
+    }
+  };
+  pD.addEventListener('keydown', keyboardHandler);
+}
+
+/**
+ * 解绑全局事件
+ * @description 清理绑定的全局事件处理器
+ */
+function unbindGlobalEvents(): void {
+  if (resizeHandler) {
+    pW.removeEventListener('resize', resizeHandler);
+    resizeHandler = null;
+  }
+
+  if (keyboardHandler) {
+    pD.removeEventListener('keydown', keyboardHandler);
+    keyboardHandler = null;
+  }
+
+  if (state.resizeRaf) {
+    pW.cancelAnimationFrame(state.resizeRaf);
+    state.resizeRaf = null;
+  }
+}
+
+/**
+ * 绑定面板内的事件
+ * @description 绑定面板内部的点击、拖拽等交互事件
+ */
+function bindPanelEvents(): void {
+  const overlay = pD.getElementById(OVERLAY_ID);
+  if (!overlay) return;
+
+  // 工作台事件
+  bindWorkbenchEvents();
+
+  // 面板点击事件委托
+  overlay.addEventListener('click', e => {
+    const target = e.target as HTMLElement;
+    if (!target) return;
+
+    // 关闭按钮
+    if (target.closest('[data-close]')) {
+      closeWorkbench();
+      return;
+    }
+
+    // 返回按钮
+    if (target.closest('[data-back]')) {
+      const prev = state.history.pop();
+      if (prev !== undefined) {
+        state.currentCategoryId = prev;
+        renderWorkbench();
+      }
+      return;
+    }
+
+    // 新增分类
+    if (target.closest('[data-new-cat]')) {
+      const name = prompt('分类名称');
+      if (name && state.pack) {
+        const cat = createCategory(name.trim(), state.currentCategoryId);
+        if (cat) {
+          toast('分类已创建');
+          renderWorkbench();
+        }
+      }
+      return;
+    }
+
+    // 新增条目
+    if (target.closest('[data-new-item]')) {
+      if (!state.pack) return;
+      const catId = state.currentCategoryId || state.pack.categories[0]?.id || null;
+      const name = prompt('条目名称');
+      if (name) {
+        createItem(catId, name.trim(), '');
+        renderWorkbench();
+      }
+      return;
+    }
+
+    // 导入
+    if (target.closest('[data-import]')) {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json';
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (file) {
+          const pack = await importPackFromFile(file);
+          if (pack) {
+            updatePack(pack);
+            renderWorkbench();
+          }
+        }
+      };
+      input.click();
+      return;
+    }
+
+    // 导出
+    if (target.closest('[data-export]')) {
+      exportPackToFile();
+      return;
+    }
+
+    // 设置
+    if (target.closest('[data-settings]')) {
+      showSettingsModal();
+      return;
+    }
+
+    // 清空预览
+    if (target.closest('[data-clear-preview]')) {
+      clearPreviewTokens();
+      syncPreviewToInput();
+      return;
+    }
+
+    // 收起/展开预览
+    if (target.closest('[data-toggle-preview]')) {
+      if (state.pack) {
+        state.pack.uiState.preview.expanded = !state.pack.uiState.preview.expanded;
+        persistPack();
+        renderWorkbench();
+      }
+      return;
+    }
+
+    // 树展开/折叠切换
+    if (target.closest('[data-tree-toggle]')) {
+      if (!state.pack) return;
+      const expanded = state.pack.uiState.sidebar.expanded || {};
+      const allExpanded = state.pack.categories.every(c => expanded[c.id] !== false);
+      state.pack.categories.forEach(c => {
+        expanded[c.id] = allExpanded;
+      });
+      persistPack();
+      renderWorkbench();
+      return;
+    }
+
+    // 搜索输入
+    const searchInput = target.closest('.fp-side-search-input') as HTMLInputElement | null;
+    if (searchInput) {
+      state.filter = searchInput.value;
+      renderWorkbench();
+      return;
+    }
+
+    // 分类树节点点击
+    const treeNode = target.closest('.fp-tree-node[data-cat-id]') as HTMLElement | null;
+    if (treeNode) {
+      const catId = treeNode.dataset.catId;
+      if (catId) {
+        handleCategoryClick(catId);
+        renderWorkbench();
+      }
+      return;
+    }
+
+    // 条目卡片点击
+    const itemCard = target.closest('.fp-card[data-item-id]') as HTMLElement | null;
+    if (itemCard && !target.closest('.fp-card-add')) {
+      const itemId = itemCard.dataset.itemId;
+      if (itemId) {
+        // 添加到预览
+        const item = getItemById(itemId);
+        if (item) {
+          addPreviewToken('item', item.name, item.content);
+          syncPreviewToInput();
+        }
+      }
+      return;
+    }
+
+    // 快速添加按钮
+    const quickAddBtn = target.closest('.fp-card-add[data-quick-add-cat]') as HTMLElement | null;
+    if (quickAddBtn) {
+      const catId = quickAddBtn.dataset.quickAddCat;
+      const name = prompt('条目名称');
+      if (name && catId) {
+        createItem(catId === '__favorites__' ? null : catId, name.trim(), '');
+        renderWorkbench();
+      }
+      return;
+    }
+  });
+
+  // 右键菜单
+  overlay.addEventListener('contextmenu', e => {
+    const target = e.target as HTMLElement;
+    if (!target) return;
+
+    const treeNode = target.closest('.fp-tree-node[data-cat-id]') as HTMLElement | null;
+    if (treeNode) {
+      const catId = treeNode.dataset.catId;
+      if (catId) {
+        handleContextMenu(e as MouseEvent, 'category', catId);
+      }
+      return;
+    }
+
+    const itemCard = target.closest('.fp-card[data-item-id]') as HTMLElement | null;
+    if (itemCard) {
+      const itemId = itemCard.dataset.itemId;
+      if (itemId) {
+        handleContextMenu(e as MouseEvent, 'item', itemId);
+      }
+      return;
+    }
+  });
+
+  // 条目执行事件
+  pD.addEventListener('item:execute', ((e: CustomEvent) => {
+    const item = e.detail?.item as Item | undefined;
+    if (item) {
+      insertQrContent(item.id);
+    }
+  }) as EventListener);
+
+  // 条目编辑事件
+  pD.addEventListener('item:edit', ((e: CustomEvent) => {
+    const itemId = e.detail?.itemId as string | undefined;
+    if (itemId) {
+      showEditItemModal(itemId);
+    }
+  }) as EventListener);
+
+  // 条目复制事件
+  pD.addEventListener('item:copy', ((e: CustomEvent) => {
+    const item = e.detail?.item as Item | undefined;
+    if (item) {
+      copyTextRobust(item.content)
+        .then(() => {
+          toast('内容已复制');
+        })
+        .catch(() => {
+          toast('复制失败');
+        });
+    }
+  }) as EventListener);
+
+  // 刷新工作台事件
+  pD.addEventListener('workbench:refresh', () => {
+    renderWorkbench();
+  });
+}
+
+/**
+ * 显示设置模态框
+ * @description 创建设置面板并显示
+ */
+function showSettingsModal(): void {
+  if (!state.pack) return;
+
+  showModal(close => {
+    const container = document.createElement('div');
+    container.className = 'fp-modal-card fp-settings-card';
+
+    const header = document.createElement('div');
+    header.className = 'fp-modal-header';
+    header.innerHTML = `<h3>${iconSvg('settings')} 设置</h3>`;
+
+    // 主内容区域：包含侧边栏和设置面板
+    const mainContent = document.createElement('div');
+    mainContent.className = 'fp-settings-main';
+
+    // 侧边栏
+    const sidebar = document.createElement('div');
+    sidebar.className = 'fp-settings-sidebar';
+
+    const settingsTabs = [
+      { id: 'general', label: '通用', icon: 'sliders' },
+      { id: 'appearance', label: '外观', icon: 'palette' },
+      { id: 'notifications', label: '通知', icon: 'bell' },
+      { id: 'defaults', label: '默认值', icon: 'bookmark' },
+    ];
+
+    let activeTab = 'general';
+
+    const renderTabs = () => {
+      sidebar.innerHTML = settingsTabs
+        .map(
+          tab => `
+        <div class="fp-settings-tab ${tab.id === activeTab ? 'active' : ''}" data-tab="${tab.id}">
+          <span class="fp-tab-icon">${iconSvg(tab.icon as any)}</span>
+          <span class="fp-tab-label">${tab.label}</span>
+        </div>
+      `,
+        )
+        .join('');
+    };
+
+    renderTabs();
+
+    // 设置面板区域
+    const settingsPanel = document.createElement('div');
+    settingsPanel.className = 'fp-settings-panel';
+
+    const renderSettingsContent = () => {
+      settingsPanel.innerHTML = '';
+
+      // 通用设置
+      if (activeTab === 'general') {
+        settingsPanel.innerHTML = `
+          <div class="fp-settings-section">
+            <h4>基本设置</h4>
+            <div class="fp-settings-row">
+              <label>默认模式</label>
+              <select class="fp-select" id="default-mode">
+                <option value="append" ${state.pack?.settings.defaults.mode === 'append' ? 'selected' : ''}>追加</option>
+                <option value="inject" ${state.pack?.settings.defaults.mode === 'inject' ? 'selected' : ''}>注入</option>
+              </select>
+            </div>
+          </div>
+        `;
+      }
+
+      // 外观设置
+      if (activeTab === 'appearance') {
+        settingsPanel.innerHTML = `
+          <div class="fp-settings-section">
+            <h4>主题</h4>
+            <div class="fp-settings-row">
+              <label>当前主题</label>
+              <select class="fp-select" id="theme-select">
+                ${Object.entries(THEME_NAMES)
+                  .map(
+                    ([key, name]) => `
+                    <option value="${key}" ${state.pack?.settings.ui.theme === key ? 'selected' : ''}>${name}</option>
+                  `,
+                  )
+                  .join('')}
+              </select>
+            </div>
+          </div>
+        `;
+      }
+
+      // 通知设置
+      if (activeTab === 'notifications') {
+        settingsPanel.innerHTML = `
+          <div class="fp-settings-section">
+            <h4>Toast 通知</h4>
+            <div class="fp-settings-row">
+              <label>显示时长 (ms)</label>
+              <input type="number" class="fp-input" id="toast-timeout"
+                     value="${state.pack?.settings.toast.timeout ?? 1800}" min="600" max="5000" step="100">
+            </div>
+            <div class="fp-settings-row">
+              <label>最大堆叠数</label>
+              <input type="number" class="fp-input" id="toast-max-stack"
+                     value="${state.pack?.settings.toast.maxStack ?? 4}" min="1" max="10">
+            </div>
+          </div>
+        `;
+      }
+
+      // 默认值设置
+      if (activeTab === 'defaults') {
+        settingsPanel.innerHTML = `
+          <div class="fp-settings-section">
+            <h4>默认值配置</h4>
+            <div class="fp-settings-row">
+              <label>条目默认状态</label>
+              <select class="fp-select" id="default-item-state">
+                <option value="active" selected>启用</option>
+                <option value="inactive">禁用</option>
+              </select>
+            </div>
+          </div>
+        `;
+      }
+    };
+
+    renderSettingsContent();
+
+    mainContent.appendChild(sidebar);
+    mainContent.appendChild(settingsPanel);
+
+    // 按钮
+    const footer = document.createElement('div');
+    footer.className = 'fp-modal-footer';
+    footer.innerHTML = `
+      <button class="fp-btn" id="reset-settings">重置</button>
+      <button class="fp-btn primary" id="save-settings">保存</button>
+    `;
+
+    container.appendChild(header);
+    container.appendChild(mainContent);
+    container.appendChild(footer);
+
+    // 绑定事件
+    setTimeout(() => {
+      // 侧边栏点击事件
+      sidebar.querySelectorAll('.fp-settings-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          const tabId = tab.getAttribute('data-tab');
+          if (tabId) {
+            activeTab = tabId;
+            renderTabs();
+            renderSettingsContent();
+          }
+        });
+      });
+
+      const themeSelect = container.querySelector('#theme-select') as HTMLSelectElement;
+      if (themeSelect) {
+        themeSelect.onchange = () => setTheme(themeSelect.value);
+      }
+
+      const saveBtn = container.querySelector('#save-settings');
+      if (saveBtn) {
+        saveBtn.addEventListener('click', () => {
+          const timeout = parseInt(
+            (container.querySelector('#toast-timeout') as HTMLInputElement)?.value || '1800',
+            10,
+          );
+          const maxStack = parseInt(
+            (container.querySelector('#toast-max-stack') as HTMLInputElement)?.value || '4',
+            10,
+          );
+          const mode = (container.querySelector('#default-mode') as HTMLSelectElement)?.value as 'append' | 'inject';
+
+          updateSettings({
+            toast: { timeout, maxStack },
+            defaults: { ...state.pack!.settings.defaults, mode },
+          });
+
+          toast('设置已保存');
+          close();
+        });
+      }
+
+      const resetBtn = container.querySelector('#reset-settings');
+      if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+          if (confirm('确定要重置所有设置吗？数据不会丢失。')) {
+            resetSettings();
+            toast('设置已重置');
+            close();
+          }
+        });
+      }
+    }, 0);
+
+    return container;
+  });
+}
+
+/**
+ * 显示编辑条目模态框
+ * @param itemId - 条目ID
+ */
+function showEditItemModal(itemId: string): void {
+  const item = getItemById(itemId);
+  if (!item || !state.pack) return;
+
+  showModal(close => {
+    const container = document.createElement('div');
+    container.className = 'fp-edit-modal';
+
+    const header = document.createElement('div');
+    header.className = 'fp-modal-header';
+    header.innerHTML = `<h3>${iconSvg('pencil')} 编辑条目</h3>`;
+
+    const content = document.createElement('div');
+    content.className = 'fp-edit-content';
+    content.innerHTML = `
+      <div class="fp-form-group">
+        <label>名称</label>
+        <input type="text" class="fp-input" id="edit-name" value="${escapeHtml(item.name)}">
+      </div>
+      <div class="fp-form-group">
+        <label>内容</label>
+        <textarea class="fp-textarea" id="edit-content" rows="8">${escapeHtml(item.content)}</textarea>
+      </div>
+      <div class="fp-form-row">
+        <div class="fp-form-group">
+          <label>模式</label>
+          <select class="fp-select" id="edit-mode">
+            <option value="append" ${item.mode === 'append' ? 'selected' : ''}>追加</option>
+            <option value="inject" ${item.mode === 'inject' ? 'selected' : ''}>注入</option>
+          </select>
+        </div>
+        <div class="fp-form-group">
+          <label>收藏</label>
+          <input type="checkbox" id="edit-favorite" ${item.favorite ? 'checked' : ''}>
+        </div>
+      </div>
+    `;
+
+    const footer = document.createElement('div');
+    footer.className = 'fp-modal-footer';
+    footer.innerHTML = `
+      <button class="fp-btn" id="cancel-edit">取消</button>
+      <button class="fp-btn primary" id="save-edit">保存</button>
+    `;
+
+    container.appendChild(header);
+    container.appendChild(content);
+    container.appendChild(footer);
+
+    // 绑定事件
+    setTimeout(() => {
+      const cancelBtn = container.querySelector('#cancel-edit');
+      if (cancelBtn) cancelBtn.addEventListener('click', close);
+
+      const saveBtn = container.querySelector('#save-edit');
+      if (saveBtn) {
+        saveBtn.addEventListener('click', () => {
+          const name = (container.querySelector('#edit-name') as HTMLInputElement)?.value;
+          const content = (container.querySelector('#edit-content') as HTMLTextAreaElement)?.value;
+          const mode = (container.querySelector('#edit-mode') as HTMLSelectElement)?.value as 'append' | 'inject';
+          const favorite = (container.querySelector('#edit-favorite') as HTMLInputElement)?.checked;
+
+          updateItem(itemId, {
+            name: name?.trim() || item.name,
+            content: content?.trim() || '',
+            mode,
+            favorite,
+          });
+
+          toast('条目已更新');
+          renderWorkbench();
+          close();
+        });
+      }
+    }, 0);
+
+    return container;
+  });
+}
+
+/**
+ * 创建覆盖层
+ * @description 创建工作台覆盖层并添加到文档
+ */
+function createOverlay(): HTMLElement {
+  let overlay = pD.getElementById(OVERLAY_ID);
+  if (overlay) return overlay;
+
+  overlay = pD.createElement('div');
+  overlay.id = OVERLAY_ID;
+  overlay.className = 'fp-overlay';
+
+  const panel = pD.createElement('div');
+  panel.className = 'fp-panel';
+  panel.setAttribute('data-theme', state.pack?.settings.ui.theme || 'herdi-light');
+
+  overlay.appendChild(panel);
+  pD.body.appendChild(overlay);
+
+  return overlay;
+}
+
+/**
+ * 打开工作台
+ * @description 显示快速回复管理器主界面
+ */
+function openWorkbench(): void {
+  if (!state.pack) {
+    toast('数据未加载');
+    return;
+  }
+
+  // 创建覆盖层
+  createOverlay();
+
+  // 注入样式
+  ensureStyle();
+  applyCustomCSS();
+
+  // 绑定事件
+  bindPanelEvents();
+  bindGlobalEvents();
+
+  // 初始化主题
+  initTheme();
+
+  // 渲染界面
+  renderWorkbench();
+
+  logInfo('工作台已打开');
+}
+
+/**
+ * 关闭工作台
+ * @description 隐藏并清理快速回复管理器界面
+ */
+function closeWorkbench(): void {
+  // 解绑事件
+  unbindWorkbenchEvents();
+  unbindGlobalEvents();
+
+  // 移除覆盖层
+  const overlay = pD.getElementById(OVERLAY_ID);
+  if (overlay) {
+    overlay.remove();
+  }
+
+  // 移除 Toast 容器
+  const toastContainer = pD.getElementById(TOAST_CONTAINER_ID);
+  if (toastContainer) {
+    toastContainer.remove();
+  }
+
+  // 清理右键菜单
+  closeContextMenu();
+
+  logInfo('工作台已关闭');
+}
+
+/**
+ * 切换工作台显示状态
+ * @description 打开或关闭工作台
+ */
+function toggleWorkbench(): void {
+  const overlay = pD.getElementById(OVERLAY_ID);
+  if (overlay) {
+    closeWorkbench();
+  } else {
+    openWorkbench();
+  }
+}
+
+/**
+ * 注册酒馆助手原生按钮
+ * @description 使用酒馆助手提供的 replaceScriptButtons API 注册按钮
+ */
+function registerTavernButton(): void {
+  console.log('[快速回复管理器] 开始注册酒馆助手原生按钮...');
+
+  try {
+    // 使用酒馆助手原生 API 注册按钮
+    replaceScriptButtons([{ name: BUTTON_LABEL, visible: true }]);
+
+    // 绑定按钮点击事件
+    eventOn(getButtonEvent(BUTTON_LABEL), () => {
+      console.log('[快速回复管理器] 原生按钮被点击');
+      toggleWorkbench();
+    });
+
+    console.log('[快速回复管理器] 酒馆助手原生按钮注册成功');
+    logInfo('酒馆助手原生按钮已注册');
+  } catch (error) {
+    console.error('[快速回复管理器] 注册原生按钮失败:', error);
+    logError('注册原生按钮失败', error);
+  }
+}
+
+/**
+ * 初始化数据
+ * @description 加载或创建默认Pack数据
+ */
+function initData(): void {
+  // 加载Pack
+  const pack = loadPack();
+  state.pack = pack;
+
+  // 加载LLM密钥配置
+  loadQrLlmSecretConfig();
+
+  // 初始化当前分类
+  if (!state.currentCategoryId && state.pack.categories.length > 0) {
+    state.currentCategoryId = state.pack.categories[0].id;
+  }
+
+  // 检测当前角色
+  detectCharacter();
+
+  logInfo('数据已初始化', { categories: pack.categories.length, items: pack.items.length });
+}
+
+/**
+ * 初始化函数
+ * @description 应用程序入口，执行完整的初始化流程
+ */
+function init(): void {
+  if (isInitialized) {
+    logInfo('已经初始化，跳过');
+    console.log('[快速回复管理器] 已经初始化，跳过');
+    return;
+  }
+
+  console.log('[快速回复管理器] 开始初始化');
+  logInfo('开始初始化快速回复管理器');
+
+  try {
+    // 初始化数据
+    console.log('[快速回复管理器] 初始化数据...');
+    initData();
+    console.log('[快速回复管理器] 数据初始化完成');
+
+    // 注册酒馆按钮
+    console.log('[快速回复管理器] 注册酒馆按钮...');
+    registerTavernButton();
+    console.log('[快速回复管理器] 按钮注册完成');
+
+    isInitialized = true;
+    logInfo('快速回复管理器初始化完成');
+    console.log('[快速回复管理器] 初始化完成');
+
+    // 显示加载成功提示
+    toast(`${SCRIPT_LABEL} 已加载`);
+  } catch (error) {
+    console.error('[快速回复管理器] 初始化失败:', error);
+    logError('初始化失败', error);
+    throw error;
+  }
+}
+
+/**
+ * 清理函数
+ * @description 页面卸载时执行清理
+ */
+function cleanup(): void {
+  try {
+    console.log('[快速回复管理器] 开始清理');
+    logInfo('开始清理');
+
+    // 关闭工作台
+    closeWorkbench();
+
+    // 移除样式
+    removeStyle();
+
+    // 注意：使用酒馆助手原生按钮，不需要手动移除
+
+    // 保存数据
+    persistPack({ immediate: true });
+
+    isInitialized = false;
+    logInfo('清理完成');
+    console.log('[快速回复管理器] 清理完成');
+  } catch (error) {
+    console.error('[快速回复管理器] 清理时出错:', error);
+  }
+}
+
+// ============================================================================
+// 导出公共API
+// ============================================================================
+
+export {
+  // 类型
+  Pack,
+  Category,
+  Item,
+  DragData,
+  AppState,
+  PreviewToken,
+  PlaceholderValues,
+  ThemeData,
+  CategoryTreeNode,
+  DragType,
+  DropMode,
+  ModalOptions,
+  ModalContentFactory,
+  TopButtonOptions,
+
+  // 常量
+  SCRIPT_LABEL,
+  BUTTON_LABEL,
+  STORE_KEY,
+  STYLE_ID,
+  OVERLAY_ID,
+  TOAST_CONTAINER_ID,
+  QR_LLM_SECRET_KEY,
+  DEFAULT_QR_LLM_PRESET_NAME,
+  DEFAULT_QR_LLM_PRESET_VERSION,
+  DATA_VERSION,
+  THEME_NAMES,
+  CONNECTOR_COLOR_NAMES,
+  CONNECTOR_COLOR_HEX,
+  CONNECTOR_ONLY_KEYS,
+
+  // 状态
+  state,
+  getState,
+  getCurrentPack,
+  getCurrentCategoryId,
+  updatePack,
+  persistPack,
+
+  // 工具函数
+  uid,
+  resolveHostWindow,
+  escapeHtml,
+  getInputValueTrim,
+  asDomElement,
+  deepClone,
+  parsePackUpdatedAtMs,
+  nowIso,
+  validateApiUrlOrThrow,
+  mergeAbortSignals,
+  fetchWithTimeout,
+  copyTextRobust,
+
+  // 调试服务
+  pushDebugLog,
+  logInfo,
+  logError,
+  getDebugLogText,
+
+  // 存储服务
+  loadPack,
+  saveScriptStoreRaw,
+  getScriptStoreRaw,
+  buildDefaultPack,
+
+  // LLM服务
+  buildDefaultQrLlmPresetStore,
+  normalizeQrLlmPresetStore,
+  getDefaultQrLlmSettings,
+  loadQrLlmSecretConfig,
+  saveQrLlmSecretConfig,
+  getQrLlmSecretConfig,
+  fetchQrLlmModels,
+  callQrLlmGenerate,
+  generateQrExpandedContent,
+  testQrLlmConnection,
+
+  // 占位符服务
+  resolvePlaceholders,
+  extractPlaceholderTokens,
+  getCurrentRolePlaceholderMap,
+  getEffectivePlaceholderValues,
+  detectCurrentCharacterState,
+
+  // 主题服务
+  getCurrentTheme,
+  setTheme,
+  applyThemeToDOM,
+  exportTheme,
+  importTheme,
+  downloadTheme,
+  importThemeFromFile,
+  getAvailableThemes,
+  getThemeDisplayName,
+  isValidTheme,
+  getCustomCSS,
+  setCustomCSS,
+  initTheme,
+
+  // 分类功能
+  getCategoryById,
+  getCategoryItems,
+  getPath,
+  getChildCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+  moveCategory,
+  reorderCategories,
+  moveCategoryRelative,
+  getCategoryTree,
+  hasChildren,
+  getDescendantIds,
+
+  // 条目功能
+  getItemById,
+  getItemsByCategory,
+  createItem,
+  updateItem,
+  deleteItem,
+  moveItem,
+  reorderItems,
+  toggleItemFavorite,
+  duplicateItem,
+  insertQrContent,
+
+  // 导入导出功能
+  exportPackToJson,
+  exportPackToJsonSafe,
+  exportPackToFile,
+  exportPackSubtreeToFile,
+  importPackFromJson,
+  importPackFromFile,
+  validatePack as validatePackData,
+  migratePack,
+  collectSubtreeIds,
+  mergePacks,
+  createPackBackup,
+  restorePackFromBackup,
+
+  // 设置功能
+  getSettings,
+  updateSettings,
+  getUiSettings,
+  updateUiSettings,
+  resetSettings,
+  getDefaultSettings,
+  cloneSettings,
+  cloneUiSettings,
+
+  // UI样式
+  ensureStyle,
+  applyCustomCSS,
+  removeStyle,
+  refreshStyles,
+
+  // UI组件
+  iconSvg,
+  renderTopButton,
+  createButton,
+  registerModalCloseCallback,
+  clearModalCloseCallbacks,
+  showModal,
+  setToastConfig,
+  resetToastConfig,
+  toast,
+  createCard,
+
+  // 工作台UI
+  ensureOverlay,
+  renderPath,
+  renderCategoryTree,
+  renderItemGrid,
+  renderMainContent,
+  renderPreview,
+  renderCompactListContent,
+  renderCompactList,
+  renderToolbar,
+  renderSidebar,
+  enableResizers,
+  renderWorkbench,
+
+  // 预览UI
+  highlightPlaceholders,
+  renderPreviewPanel,
+  updatePreview,
+  renderPlaceholderPreview,
+  refreshPreviewPanel,
+  getPreviewTokens,
+  setPreviewTokens,
+  addPreviewToken,
+  clearPreviewTokens,
+
+  // 事件处理
+  isClickSuppressed,
+  suppressNextClick,
+  handleDragStart,
+  handleDragOver,
+  handleDrop,
+  handleDragEnd,
+  handleCategoryClick,
+  handleItemClick,
+  handleContextMenu,
+  bindWorkbenchEvents,
+  unbindWorkbenchEvents,
+  addTouchLongPress,
+  currentDragData,
+  cleanupDrag,
+  closeContextMenu,
+
+  // 核心功能
+  openWorkbench,
+  closeWorkbench,
+  toggleWorkbench,
+  registerTavernButton,
+  init,
+  cleanup,
+  detectCharacter,
+  syncPreviewToInput,
+};
+
+// ============================================================================
+// 自动初始化
+// ============================================================================
+
+// 安全初始化：优先使用 jQuery ready，失败时回退到原生时序
+const hostDollar = typeof pW === 'object' && pW && '$' in pW ? Reflect.get(pW, '$') : undefined;
+if (typeof hostDollar === 'function') {
+  hostDollar(() => {
+    errorCatched(init)();
+  });
+} else if (document.readyState === 'loading') {
+  window.addEventListener('load', () => {
+    errorCatched(init)();
+  });
+} else {
+  errorCatched(init)();
+}
+
+// 页面卸载时清理：使用原生事件，避免 $(window) 在特定环境抛错
+window.addEventListener('pagehide', () => {
+  try {
+    if (!isInitialized) return;
+    cleanup();
+  } catch (error) {
+    console.error('[快速回复管理器] pagehide 事件处理出错:', error);
+  }
+});

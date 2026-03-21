@@ -1,5 +1,5 @@
 # AGENTS.md - 快速回复管理器项目指南
-
+# 未重构前的快速回复管理器脚本：Quick-Reply-Manager\src\快速回复管理器\index.ts.original
 ## 项目概述
 
 本项目是为酒馆助手 (Tavern
@@ -220,3 +220,61 @@ triggerSlash('/command arg');
 - `util/` - 工具函数
 - `slash_command.txt` - STScript 命令列表
 - `.cursor/rules/` - Cursor 编写规则
+
+## 快速回复管理器架构
+
+### 目录结构
+
+```
+src/快速回复管理器/
+├── types.ts          # 类型定义 (Core)
+├── constants.ts      # 常量定义 (Core)
+├── store.ts          # 状态管理 (Core)
+├── styles/           # SCSS样式
+│   ├── _base.scss
+│   ├── _components.scss
+│   ├── _animations.scss
+│   ├── _themes.scss
+│   └── index.scss
+├── utils/            # 工具函数
+│   ├── dom.ts
+│   ├── data.ts
+│   ├── validation.ts
+│   └── network.ts
+├── services/         # 服务层
+│   ├── debug.ts
+│   ├── storage.ts
+│   ├── llm.ts
+│   ├── placeholder.ts
+│   └── theme.ts
+├── features/         # 功能模块
+│   ├── categories.ts
+│   ├── items.ts
+│   ├── import-export.ts
+│   └── settings.ts
+├── ui/               # UI层
+│   ├── styles.ts
+│   ├── components.ts
+│   ├── workbench.ts
+│   ├── preview.ts
+│   └── events.ts
+└── index.ts          # 入口文件
+```
+
+### 导入顺序规范
+
+1. 类型定义: `import type { ... } from './types'`
+2. 常量: `import { ... } from './constants'`
+3. 状态: `import { ... } from './store'`
+4. 工具: `import { ... } from './utils/*'`
+5. 服务: `import { ... } from './services/*'`
+6. 功能: `import { ... } from './features/*'`
+7. UI: `import { ... } from './ui/*'`
+
+### 架构原则
+
+- **单一职责**: 每个模块只负责一个功能领域
+- **依赖方向**: Core → Utils → Services → Features → UI → Entry
+- **状态管理**: 使用模块级单例，不引入外部状态库
+- **无副作用**: 工具层函数保持纯函数
+- **向后兼容**: 保持原有数据格式和CSS类名

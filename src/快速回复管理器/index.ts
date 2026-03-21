@@ -72,6 +72,7 @@ import {
   testQrLlmConnection,
   normalizePromptGroup,
   compileQrLlmPreset,
+  invalidateEditGeneration,
 } from './services/llm';
 import {
   resolvePlaceholders,
@@ -294,6 +295,9 @@ let resizeHandler: (() => void) | null = null;
 /** 键盘快捷键处理器 */
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 
+/** 面板点击事件处理器 */
+let panelClickHandler: ((e: MouseEvent) => void) | null = null;
+
 // ============================================================================
 // 核心功能函数
 // ============================================================================
@@ -346,7 +350,8 @@ function syncPreviewToInput(): void {
  * @description 根据视口大小调整面板尺寸
  */
 function applyFitPanelSize(): void {
-  if (!state.pack?.uiState?.panelSize) return;
+  if (!state.pack) return;
+  if (!state.pack.uiState?.panelSize) return;
 
   const vp = {
     width: Math.max(320, Number(pW?.innerWidth) || 320),
@@ -432,200 +437,221 @@ function unbindGlobalEvents(): void {
 }
 
 /**
- * 绑定面板内的事件
- * @description 绑定面板内部的点击、拖拽等交互事件
+ * 处理面板点击事件
+ * @param e - 点击事件
  */
-function bindPanelEvents(): void {
-  const overlay = pD.getElementById(OVERLAY_ID);
-  if (!overlay) return;
+function handlePanelClick(e: MouseEvent): void {
+  const target = e.target as HTMLElement;
+  if (!target) return;
 
-  // 工作台事件
-  bindWorkbenchEvents();
+  // 关闭按钮
+  if (target.closest('[data-close]')) {
+    closeWorkbench();
+    return;
+  }
 
-  // 面板点击事件委托
-  overlay.addEventListener('click', e => {
-    const target = e.target as HTMLElement;
-    if (!target) return;
-
-    // 关闭按钮
-    if (target.closest('[data-close]')) {
-      closeWorkbench();
-      return;
+  // 返回按钮
+  if (target.closest('[data-back]')) {
+    const prev = state.history.pop();
+    if (prev !== undefined) {
+      state.currentCategoryId = prev;
+      renderWorkbench();
     }
+    return;
+  }
 
-    // 返回按钮
-    if (target.closest('[data-back]')) {
-      const prev = state.history.pop();
-      if (prev !== undefined) {
-        state.currentCategoryId = prev;
+  // 新增分类
+  if (target.closest('[data-new-cat]')) {
+    const name = prompt('分类名称');
+    if (name && state.pack) {
+      const cat = createCategory(name.trim(), state.currentCategoryId);
+      if (cat) {
+        toast('分类已创建');
         renderWorkbench();
       }
-      return;
     }
+    return;
+  }
 
-    // 新增分类
-    if (target.closest('[data-new-cat]')) {
-      const name = prompt('分类名称');
-      if (name && state.pack) {
-        const cat = createCategory(name.trim(), state.currentCategoryId);
-        if (cat) {
-          toast('分类已创建');
-          renderWorkbench();
-        }
-      }
-      return;
+  // 新增条目
+  if (target.closest('[data-new-item]')) {
+    if (!state.pack) return;
+    const catId = state.currentCategoryId || state.pack.categories[0]?.id || null;
+    const itemName = prompt('条目名称');
+    if (itemName) {
+      createItem(catId, itemName.trim(), '');
+      renderWorkbench();
     }
+    return;
+  }
 
-    // 新增条目
-    if (target.closest('[data-new-item]')) {
+  // 导入
+  if (target.closest('[data-import]')) {
+    openAdvancedImportModal();
+    return;
+  }
+
+  // 导出
+  if (target.closest('[data-export]')) {
+    exportPackToFile();
+    return;
+  }
+
+  // 设置
+  if (target.closest('[data-settings]')) {
+    showSettingsModal();
+    return;
+  }
+
+  // 清空预览
+  if (target.closest('[data-clear-preview]')) {
+    clearPreviewTokens();
+    syncPreviewToInput();
+    return;
+  }
+
+  // 收起/展开预览
+  if (target.closest('[data-toggle-preview]')) {
+    if (state.pack) {
+      state.pack.uiState.preview.expanded = !state.pack.uiState.preview.expanded;
+      persistPack();
+      renderWorkbench();
+    }
+    return;
+  }
+
+  // 树展开/折叠切换
+  if (target.closest('[data-tree-toggle]')) {
+    if (!state.pack) return;
+    const expanded = state.pack.uiState.sidebar.expanded || {};
+    const allExpanded = state.pack.categories.every(c => expanded[c.id] !== false);
+    state.pack.categories.forEach(c => {
+      expanded[c.id] = allExpanded;
+    });
+    persistPack();
+    renderWorkbench();
+    return;
+  }
+
+  // 搜索输入
+  const searchInput = target.closest('.fp-side-search-input') as HTMLInputElement | null;
+  if (searchInput) {
+    state.filter = searchInput.value;
+    renderWorkbench();
+    return;
+  }
+
+  // 分类树节点点击
+  const treeNode = target.closest('.fp-tree-node[data-cat-id]') as HTMLElement | null;
+  if (treeNode) {
+    const catId = treeNode.dataset.catId;
+    if (catId) {
+      handleCategoryClick(catId);
+      renderWorkbench();
+    }
+    return;
+  }
+
+  // 条目卡片点击
+  const itemCard = target.closest('.fp-card[data-item-id]') as HTMLElement | null;
+  if (itemCard && !target.closest('.fp-card-add')) {
+    const itemId = itemCard.dataset.itemId;
+    if (itemId) {
+      // 实际执行条目
+      import('./features/items').then(({ insertQrContent }) => {
+        insertQrContent(itemId);
+      });
+    }
+    return;
+  }
+
+  // 连接符按钮点击
+  const connectors = state.pack?.settings?.connectors || [];
+  connectors.forEach((conn, i) => {
+    const connBtn = target.closest(`[data-conn-${i}]`) as HTMLElement | null;
+    if (connBtn) {
       if (!state.pack) return;
-      const catId = state.currentCategoryId || state.pack.categories[0]?.id || null;
-      const name = prompt('条目名称');
-      if (name) {
-        createItem(catId, name.trim(), '');
-        renderWorkbench();
-      }
-      return;
-    }
-
-    // 导入
-    if (target.closest('[data-import]')) {
-      openAdvancedImportModal();
-      return;
-    }
-
-    // 导出
-    if (target.closest('[data-export]')) {
-      exportPackToFile();
-      return;
-    }
-
-    // 设置
-    if (target.closest('[data-settings]')) {
-      showSettingsModal();
-      return;
-    }
-
-    // 清空预览
-    if (target.closest('[data-clear-preview]')) {
-      clearPreviewTokens();
-      syncPreviewToInput();
-      return;
-    }
-
-    // 收起/展开预览
-    if (target.closest('[data-toggle-preview]')) {
-      if (state.pack) {
-        state.pack.uiState.preview.expanded = !state.pack.uiState.preview.expanded;
+      if (!state.pack.settings.defaults.connectorPrefixMode) {
+        // 直接插入模式
+        addPreviewToken(`conn-id:${conn.id}`, conn.token, conn.token);
+        syncPreviewToInput();
+        toast(`已插入"${conn.label}"`);
+      } else {
+        // 前缀模式：选择激活连接符
+        state.pack.settings.defaults.connectorPrefixId = conn.id;
         persistPack();
         renderWorkbench();
       }
       return;
     }
-
-    // 树展开/折叠切换
-    if (target.closest('[data-tree-toggle]')) {
-      if (!state.pack) return;
-      const expanded = state.pack.uiState.sidebar.expanded || {};
-      const allExpanded = state.pack.categories.every(c => expanded[c.id] !== false);
-      state.pack.categories.forEach(c => {
-        expanded[c.id] = allExpanded;
-      });
-      persistPack();
-      renderWorkbench();
-      return;
-    }
-
-    // 搜索输入
-    const searchInput = target.closest('.fp-side-search-input') as HTMLInputElement | null;
-    if (searchInput) {
-      state.filter = searchInput.value;
-      renderWorkbench();
-      return;
-    }
-
-    // 分类树节点点击
-    const treeNode = target.closest('.fp-tree-node[data-cat-id]') as HTMLElement | null;
-    if (treeNode) {
-      const catId = treeNode.dataset.catId;
-      if (catId) {
-        handleCategoryClick(catId);
-        renderWorkbench();
-      }
-      return;
-    }
-
-    // 条目卡片点击
-    const itemCard = target.closest('.fp-card[data-item-id]') as HTMLElement | null;
-    if (itemCard && !target.closest('.fp-card-add')) {
-      const itemId = itemCard.dataset.itemId;
-      if (itemId) {
-        // 实际执行条目
-        import('./features/items').then(({ insertQrContent }) => {
-          insertQrContent(itemId);
-        });
-      }
-      return;
-    }
-
-    // 连接符按钮点击
-    const connectors = state.pack?.settings?.connectors || [];
-    connectors.forEach((conn, i) => {
-      const connBtn = target.closest(`[data-conn-${i}]`) as HTMLElement | null;
-      if (connBtn) {
-        if (!state.pack) return;
-        if (!state.pack.settings.defaults.connectorPrefixMode) {
-          // 直接插入模式
-          addPreviewToken(`conn-id:${conn.id}`, conn.token, conn.token);
-          syncPreviewToInput();
-          toast(`已插入"${conn.label}"`);
-        } else {
-          // 前缀模式：选择激活连接符
-          state.pack.settings.defaults.connectorPrefixId = conn.id;
-          persistPack();
-          renderWorkbench();
-        }
-        return;
-      }
-    });
-
-    // 连接符模式切换开关
-    const connModeToggle = target.closest('[data-conn-mode-toggle]') as HTMLElement | null;
-    if (connModeToggle) {
-      if (!state.pack) return;
-      const next = !state.pack.settings.defaults.connectorPrefixMode;
-      state.pack.settings.defaults.connectorPrefixMode = next;
-      if (next && !state.pack.settings.defaults.connectorPrefixId && connectors.length > 0) {
-        state.pack.settings.defaults.connectorPrefixId = connectors[0].id;
-      }
-      persistPack();
-      renderWorkbench();
-      return;
-    }
-
-    // 自定义连接符按钮
-    const connCustomBtn = target.closest('[data-conn-custom]') as HTMLElement | null;
-    if (connCustomBtn) {
-      const token = prompt('输入自定义连接符内容');
-      if (token && state.pack) {
-        addPreviewToken('raw', token, token);
-        syncPreviewToInput();
-      }
-      return;
-    }
-
-    // 快速添加按钮
-    const quickAddBtn = target.closest('.fp-card-add[data-quick-add-cat]') as HTMLElement | null;
-    if (quickAddBtn) {
-      const catId = quickAddBtn.dataset.quickAddCat;
-      const name = prompt('条目名称');
-      if (name && catId) {
-        createItem(catId === '__favorites__' ? null : catId, name.trim(), '');
-        renderWorkbench();
-      }
-      return;
-    }
   });
+
+  // 连接符模式切换开关
+  const connModeToggle = target.closest('[data-conn-mode-toggle]') as HTMLElement | null;
+  if (connModeToggle) {
+    if (!state.pack) return;
+    const next = !state.pack.settings.defaults.connectorPrefixMode;
+    state.pack.settings.defaults.connectorPrefixMode = next;
+    if (next && !state.pack.settings.defaults.connectorPrefixId && connectors.length > 0) {
+      state.pack.settings.defaults.connectorPrefixId = connectors[0].id;
+    }
+    persistPack();
+    renderWorkbench();
+    return;
+  }
+
+  // 自定义连接符按钮
+  const connCustomBtn = target.closest('[data-conn-custom]') as HTMLElement | null;
+  if (connCustomBtn) {
+    const token = prompt('输入自定义连接符内容');
+    if (token && state.pack) {
+      addPreviewToken('raw', token, token);
+      syncPreviewToInput();
+    }
+    return;
+  }
+
+  // 快速添加按钮
+  const quickAddBtn = target.closest('.fp-card-add[data-quick-add-cat]') as HTMLElement | null;
+  if (quickAddBtn) {
+    const catId = quickAddBtn.dataset.quickAddCat;
+    const itemName = prompt('条目名称');
+    if (itemName && catId) {
+      createItem(catId === '__favorites__' ? null : catId, itemName.trim(), '');
+      renderWorkbench();
+    }
+    return;
+  }
+}
+
+/**
+ * 绑定面板内的事件
+ * @description 绑定面板内部的点击、拖拽等交互事件
+ */
+function bindPanelEvents(): void {
+  const overlay = pD.getElementById(OVERLAY_ID);
+  if (!overlay) {
+    logError('bindPanelEvents: overlay not found');
+    return;
+  }
+
+  // 先解绑所有工作台事件（避免时序问题）
+  unbindWorkbenchEvents();
+
+  // 如果已有面板点击处理器，先移除旧的
+  if (panelClickHandler) {
+    overlay.removeEventListener('click', panelClickHandler);
+    panelClickHandler = null;
+    logInfo('已移除旧的面板点击事件监听器');
+  }
+
+  // 重新绑定工作台事件
+  bindWorkbenchEvents();
+
+  // 保存处理器引用并绑定新的事件
+  panelClickHandler = handlePanelClick;
+  overlay.addEventListener('click', panelClickHandler);
+  logInfo('面板点击事件已绑定');
 
   // 右键菜单
   overlay.addEventListener('contextmenu', e => {
@@ -3343,6 +3369,9 @@ function openWorkbench(): void {
  * @description 隐藏并清理快速回复管理器界面
  */
 function closeWorkbench(): void {
+  // 使当前编辑生成失效
+  invalidateEditGeneration();
+
   // 解绑事件
   unbindWorkbenchEvents();
   unbindGlobalEvents();
