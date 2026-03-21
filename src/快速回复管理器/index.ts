@@ -17,6 +17,7 @@ import type {
   QrLlmPresetStore,
   QrLlmPreset,
   ConnectorButton,
+  Settings,
 } from './types';
 
 // ============================================================================
@@ -48,8 +49,8 @@ import { state, getState, getCurrentPack, getCurrentCategoryId, updatePack, pers
 // ============================================================================
 // 工具函数导入
 // ============================================================================
-import { uid, resolveHostWindow, escapeHtml, getInputValueTrim, asDomElement } from './utils/dom';
-import { deepClone, parsePackUpdatedAtMs, nowIso } from './utils/data';
+import { uid, resolveHostWindow, escapeHtml, getInputValueTrim, asDomElement, getInputBox } from './utils/dom';
+import { deepClone, parsePackUpdatedAtMs, nowIso, splitMultiValue, joinMultiValue } from './utils/data';
 import { validateApiUrlOrThrow, mergeAbortSignals } from './utils/validation';
 import { fetchWithTimeout, copyTextRobust } from './utils/network';
 
@@ -80,6 +81,10 @@ import {
   detectCurrentCharacterState,
   syncActiveCharacterMapping,
   getExistingCharacterCardsSafe,
+  handleActiveCharacterContextChanged,
+  getAllWorldbookNamesSafe,
+  getCurrentCharacterBoundWorldbookNames,
+  getWorldbookEntryOptionsByNames,
 } from './services/placeholder';
 import type { ThemeData } from './services/theme';
 import {
@@ -217,6 +222,58 @@ import {
   closeContextMenu,
   runSnapshotReorderDrag,
 } from './ui/events';
+
+// ============================================================================
+// 本地辅助函数
+// ============================================================================
+
+function resolvePlaceholdersWithMap(
+  text: string,
+  placeholders: Record<string, string>,
+  roleValues?: Record<string, string> | null,
+): string {
+  return String(text || '').replace(/\{@([^:}]+)(?::([^}]*))?\}/g, (_, key: string, fallback: string) => {
+    const roleValue = roleValues?.[key];
+    if (roleValue !== undefined && String(roleValue).length > 0) return String(roleValue);
+    const defaultValue = placeholders[key];
+    if (defaultValue !== undefined && String(defaultValue).length > 0) return String(defaultValue);
+    return fallback !== undefined ? String(fallback) : '';
+  });
+}
+
+function parseAdditionalBodyParams(raw: string): Record<string, unknown> {
+  const text = String(raw || '').trim();
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    if (!isPlainObject(parsed)) throw new Error('附加参数必须是对象');
+    return parsed;
+  } catch (e) {
+    const parsedYaml = parseSimpleYamlObject(text);
+    if (!isPlainObject(parsedYaml)) throw new Error('附加参数必须是对象');
+    return parsedYaml;
+  }
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v) && Object.prototype.toString.call(v) === '[object Object]';
+}
+
+function parseSimpleYamlObject(text: string): Record<string, unknown> | null {
+  const lines = String(text || '').split(/\r?\n/);
+  const result: Record<string, unknown> = {};
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const idx = trimmed.indexOf(':');
+    if (idx === -1) continue;
+    const key = trimmed.slice(0, idx).trim();
+    const val = trimmed.slice(idx + 1).trim();
+    if (!key) continue;
+    result[key] = val;
+  }
+  return Object.keys(result).length > 0 ? result : null;
+}
 
 // ============================================================================
 // 全局变量
@@ -3898,11 +3955,11 @@ function openAdvancedImportModal(): void {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
-      const incoming = validatePack(parsed);
-      if (!incoming) {
+      if (!validatePack(parsed)) {
         toast('无效的导入数据');
         return;
       }
+      const incoming = parsed as Pack;
 
       openImportSelectionModal(incoming, (selectedIncoming, includeSettings) => {
         if (!selectedIncoming) return;

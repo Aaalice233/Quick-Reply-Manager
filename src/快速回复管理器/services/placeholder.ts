@@ -105,16 +105,21 @@ export function getCurrentRolePlaceholderMap(createIfMissing = false): Record<st
 
 /**
  * 获取所有有效的占位符值
+ * @param placeholders - 占位符对象（可选，默认从state获取）
+ * @param roleValues - 角色值对象（可选，默认从state获取）
  * @returns 合并后的占位符值（默认、用户设置和角色特定值）
  */
-export function getEffectivePlaceholderValues(): Record<string, string> {
-  const placeholders = state.pack?.settings?.placeholders || {};
-  const roleValues = getCurrentRolePlaceholderMap(false);
+export function getEffectivePlaceholderValues(
+  placeholders?: Record<string, string>,
+  roleValues?: Record<string, string> | null,
+): Record<string, string> {
+  const finalPlaceholders = placeholders ?? state.pack?.settings?.placeholders ?? {};
+  const finalRoleValues = roleValues ?? getCurrentRolePlaceholderMap(false);
 
   const merged: Record<string, string> = {};
-  for (const [k, v] of Object.entries(placeholders || {})) merged[k] = String(v ?? '');
-  if (!roleValues) return merged;
-  for (const [k, v] of Object.entries(roleValues || {})) {
+  for (const [k, v] of Object.entries(finalPlaceholders || {})) merged[k] = String(v ?? '');
+  if (!finalRoleValues) return merged;
+  for (const [k, v] of Object.entries(finalRoleValues || {})) {
     if (v !== undefined && String(v).length > 0) merged[k] = String(v);
   }
   return merged;
