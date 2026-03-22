@@ -11,4 +11,4 @@ pnpm-debug.log*
 
 auto-imports.d.ts
 components.d.ts
-test_*.png
+test-screenshots/
