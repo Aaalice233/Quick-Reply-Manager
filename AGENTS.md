@@ -243,9 +243,14 @@ npm install -g agent-browser
 Windows 用户需先启动 Chrome（带远程调试端口）：
 
 ```bash
-# 在另一个终端启动 Chrome
-chrome --remote-debugging-port=9222 --no-sandbox
+# 在另一个终端启动 Chrome（Git Bash）
+chrome --remote-debugging-port=9222 --no-sandbox --headless=new &
+
+# 验证调试端口是否可用
+curl http://127.0.0.1:9222/json/version
 ```
+
+**注意**：`--headless=new` 参数表示使用新的 headless 模式，如果需要可视化界面可以去掉此参数。
 
 ### 测试流程
 
@@ -295,28 +300,56 @@ agent-browser screenshot result.png --full
 agent-browser eval "document.title"
 ```
 
-#### 4. 测试示例：创建快速回复
+#### 4. 测试示例：完整测试流程
 
 ```bash
-# 打开管理器
+# 1. 连接浏览器（确保 Chrome 已启动）
+agent-browser connect 9222
+
+# 2. 导航到酒馆
+agent-browser navigate http://localhost:8000
+
+# 3. 查找快速回复管理器按钮
+agent-browser snapshot --interactive | grep "快速回复管理器"
+# 输出: - button "💌快速回复管理器" [ref=e22]
+
+# 4. 点击打开管理器
 agent-browser click @e22
 
-# 获取面板内元素
-agent-browser snapshot --interactive
+# 5. 点击分类（如剧情编排）
+agent-browser click @e10
 
-# 点击新建条目按钮
-agent-browser click @e25
+# 6. 进入子分类（如时间推进）
+agent-browser click @e11
 
-# 填写信息
-agent-browser fill @e30 "测试标题"
-agent-browser fill @e31 "/setvar key=value"
+# 7. 点击条目（如推进到晚上）
+agent-browser click @e9
 
-# 保存
-agent-browser click @e35
+# 8. 点击连接符按钮
+agent-browser click @e2  # "然后"
 
-# 截图验证
-agent-browser screenshot saved.png --full
+# 9. 截图验证
+agent-browser screenshot test_result.png --full
+
+# 10. 关闭浏览器
+agent-browser close
 ```
+
+#### 5. 常用命令速查
+
+| 命令                                       | 说明                  |
+| ------------------------------------------ | --------------------- |
+| `agent-browser connect 9222`               | 连接到已运行的 Chrome |
+| `agent-browser navigate <url>`             | 导航到指定网址        |
+| `agent-browser snapshot`                   | 获取完整页面快照      |
+| `agent-browser snapshot --interactive`     | 获取交互元素列表      |
+| `agent-browser click @e<N>`                | 点击指定元素          |
+| `agent-browser fill @e<N> "文本"`          | 填写输入框            |
+| `agent-browser screenshot file.png --full` | 全页截图              |
+| `agent-browser eval "JS代码"`              | 执行 JavaScript       |
+| `agent-browser close`                      | 关闭浏览器            |
+
+**提示**：使用 `agent-browser snapshot --interactive | grep "关键词"` 可以快速查找元素引用。
 
 ### 测试检查清单
 
