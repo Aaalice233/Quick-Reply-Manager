@@ -209,14 +209,15 @@ export function showModal(contentFactory: ModalContentFactory, opts?: ModalOptio
   }
 
   const replace = opts?.replace !== false;
-  let modalWrapper = overlay.querySelector('.fp-modal') as HTMLElement | null;
+  // 从 body 查找已有的 modal，避免受 overlay 的 backdrop-filter 影响
+  let modalWrapper = pD.body.querySelector(':scope > .fp-modal') as HTMLElement | null;
 
   if (replace && modalWrapper) {
     executeModalCloseCallbacks();
     modalWrapper.remove();
   }
 
-  // 创建模态框外层（遮罩层）
+  // 创建模态框外层（遮罩层），挂到 body 以避免 backdrop-filter 影响 fixed 定位
   modalWrapper = pD.createElement('div');
   modalWrapper.className = 'fp-modal';
 
@@ -231,7 +232,7 @@ export function showModal(contentFactory: ModalContentFactory, opts?: ModalOptio
   );
 
   modalWrapper.appendChild(card);
-  overlay.appendChild(modalWrapper);
+  pD.body.appendChild(modalWrapper);
 }
 
 // ============================================================================
