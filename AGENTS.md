@@ -1,66 +1,96 @@
-# AGENTS.md - 快速回复管理器项目指南
+# AGENTS.md - 快速回复管理器协作指南
 
-> 本文档使用简体中文编写
+> 适用范围：`c:\Claude3\Quick-Reply-Manager`  
+> 文档语言：简体中文
 
-## 项目概述
+## 1. 项目定位
 
-本项目是为酒馆助手 (Tavern Helper) 编写的脚本，在酒馆 (SillyTavern) 中以无沙盒 iframe 形式运行。
+快速回复管理器是运行在酒馆助手（Tavern Helper）中的前端脚本，以**无沙盒 iframe**方式挂载在 SillyTavern 页面。
 
-- **主入口**: `src/快速回复管理器/index.ts`
-- **技术栈**: TypeScript + Webpack + TailwindCSS + SCSS
-- **运行环境**: 浏览器 iframe (酒馆网页内)
+- 主入口：`src/快速回复管理器/index.ts`
+- 技术栈：TypeScript + Webpack + TailwindCSS + SCSS
+- 运行环境：浏览器（非 Node 运行时）
 
-## 命令速查
+## 2. 一键上手（最短路径）
 
 ```bash
-# 安装依赖
 pnpm install
+pnpm watch
+```
 
-# 开发模式（热重载 + Live Server）
+随后在 VSCode 启动 Live Server（默认 5500），并在酒馆助手中导入本地配置（URL 请使用 `127.0.0.1`）。
+
+建议流程：
+
+1. `pnpm watch`
+2. 启动 SillyTavern：`..\SillyTavern\UpdateAndStart.bat`
+3. 酒馆助手开启实时监听
+4. 保存代码并在页面验证
+
+## 3. 常用命令
+
+```bash
+# 开发
 pnpm watch
 
 # 构建
-pnpm build          # 生产构建
-pnpm build:dev      # 开发构建
+pnpm build
+pnpm build:dev
 
-# 代码检查与格式化
-pnpm lint           # ESLint 检查
-pnpm lint:fix       # 自动修复
-pnpm format         # Prettier 格式化
+# 质量保障
+pnpm lint
+pnpm lint:fix
+pnpm format
 
-# 其他
-pnpm dump           # 生成 schema.json
-pnpm sync           # 同步角色卡/世界书/预设
+# 辅助
+pnpm dump
+pnpm sync
 ```
 
-## 实时开发流程
+## 4. 必须遵守的运行时规则
 
-1. 启动开发服务器: `pnpm watch`
-2. VSCode 启动 Live Server (端口 5500)
-3. 酒馆助手 → 脚本库 → 导入配置 JSON (URL 必须用 `127.0.0.1`)
-4. 酒馆助手 → 开发 → 实时监听 → 允许监听
-5. 编辑代码，保存后自动更新
+### 4.1 生命周期与清理
 
-**CORS 配置** (`.vscode/settings.json`):
+- 允许：`$(() => { ... })`
+- 允许：`$(window).on('pagehide', () => { ... })`
+- 禁止：`DOMContentLoaded`
+- 禁止：`unload`
 
-```json
-{
-  "liveServer.settings.headers": {
-    "Access-Control-Allow-Origin": "*"
-  }
+原因：iframe + 酒馆注入场景下，`DOMContentLoaded`/`unload`可靠性不足。
+
+### 4.2 浏览器环境约束
+
+- 禁止依赖 Node.js 专属库
+- 禁止在 `index.html` 直接引用本地脚本文件（应走 TypeScript import）
+- 谨慎使用视口高度单位，避免 `vh` 在 iframe 中导致布局偏差
+
+### 4.3 类型与错误处理
+
+- 禁止：`as any`、`@ts-ignore`
+- 禁止：空 `catch {}`
+- 入口函数统一用 `errorCatched` 包装
+
+示例：
+
+```typescript
+function init() {
+  // ...
 }
+
+$(() => {
+  errorCatched(init)();
+});
 ```
 
-## 代码风格规范
+## 5. 代码规范
 
-### TypeScript
+### 5.1 TypeScript 约定
 
-- **Strict mode**: 启用 (`strict: true`)
-- **Target**: ESNext
-- **Module**: ESNext (bundler resolution)
-- **未使用变量**: 警告级别
+- `strict: true`
+- `target: ESNext`
+- `module: ESNext`（bundler）
 
-### Prettier 配置
+### 5.2 Prettier 约定
 
 ```json
 {
@@ -73,344 +103,199 @@ pnpm sync           # 同步角色卡/世界书/预设
 }
 ```
 
-### 命名约定
+### 5.3 命名规范
 
-| 类型      | 约定                 | 示例                      |
-| --------- | -------------------- | ------------------------- |
-| 常量      | SCREAMING_SNAKE_CASE | `STORE_KEY`, `OVERLAY_ID` |
-| 函数/变量 | camelCase            | `getData()`, `itemCount`  |
-| 接口/类型 | PascalCase           | `QrItem`, `CategoryData`  |
-| 私有函数  | 下划线前缀           | `_helperFunc()`           |
+- 常量：`SCREAMING_SNAKE_CASE`
+- 函数/变量：`camelCase`
+- 类型/接口：`PascalCase`
+- 私有函数：`_leadingUnderscore`
 
-### 导入顺序
+### 5.4 推荐导入顺序
 
-```typescript
-// 1. 类型定义
-import type { QrItem } from './types';
-// 2. 常量
-import { STORE_KEY } from './constants';
-// 3. 状态
-import { store } from './store';
-// 4. 工具 → 5. 服务 → 6. 功能 → 7. UI
-```
+1. 类型
+2. 常量
+3. 状态
+4. 工具
+5. 服务
+6. 功能
+7. UI
 
-## 脚本编写规范
+## 6. 与酒馆交互的标准方式
 
-### 初始化与清理
+### 6.1 变量读写
 
 ```typescript
-// 正确：使用 jQuery 加载
-$(() => {
-  toastr.success('加载成功');
-});
-// 正确：使用 pagehide 清理
-$(window).on('pagehide', () => {
-  // 清理代码
-});
-// 错误：DOMContentLoaded 不会被触发
-// document.addEventListener('DOMContentLoaded', fn); // 禁止
-```
-
-### 酒馆交互
-
-```typescript
-// 变量操作
-getVariables({ type: 'script' });
-replaceVariables(data, { type: 'script', script_id: getScriptId() });
-// 消息操作
-getChatMessages();
-setChatMessages(messages);
-// jQuery 指向酒馆网页
-$('body'); // 选择酒馆网页的 body
-```
-
-### 数据持久化
-
-```typescript
-const STORE_KEY = 'fastPlotQRPack';
-// 读取
 const vars = getVariables({ type: 'script' });
 const pack = vars[STORE_KEY];
-// 写入
+
 insertOrAssignVariables({ [STORE_KEY]: data }, { type: 'script' });
 ```
 
-### 错误处理
+### 6.2 聊天消息
 
 ```typescript
-// 使用 errorCatched 包装入口
-function init() {
-  // 可能抛出错误的代码
-}
-$(() => {
-  errorCatched(init)();
-});
+const messages = getChatMessages();
+setChatMessages(messages);
 ```
 
-## UI 样式规范
-
-### CSS 变量
-
-```css
---qr-bg-1, --qr-bg-2, --qr-bg-3  /* 背景层 */
---qr-text-1, --qr-text-2         /* 文本颜色 */
---qr-accent, --qr-accent-hover   /* 强调色 */
---qr-border-1, --qr-border-2    /* 边框色 */
---qr-card-bg, --qr-btn-bg       /* 卡片与按钮 */
-```
-
-### 样式规则
-
-- 优先使用 TailwindCSS class
-- 禁止与酒馆网页冲突的类名
-- 注入样式时使用唯一 ID 避免冲突
-
-## 禁止事项
-
-| 禁止项                  | 正确做法                |
-| ----------------------- | ----------------------- |
-| `DOMContentLoaded`      | 使用 `$(() => {})`      |
-| `'unload'` 事件         | 使用 `'pagehide'`       |
-| index.html 引用本地文件 | 通过 TypeScript 导入    |
-| `vh` 单位               | iframe 环境中高度不正确 |
-| Node.js 库              | 仅浏览器环境            |
-| `as any`, `@ts-ignore`  | 正确类型定义            |
-| 空 catch 块             | 必须处理或记录错误      |
-
-## 调试技巧
+### 6.3 上下文与命令
 
 ```typescript
-// 获取酒馆上下文
 const ctx = (pW as any).SillyTavern?.getContext?.();
-// 日志系统
-pushDebugLog('消息', payload);
-logInfo('INFO 消息', payload);
-logError('ERROR 消息', payload);
-// 调用酒馆命令
 triggerSlash('/command arg');
 ```
 
-## 项目架构
+## 7. UI 与样式约束
 
+- 优先 TailwindCSS class
+- 样式类名避免与酒馆页面冲突
+- 注入样式必须使用唯一 ID
+
+推荐主题变量：
+
+```css
+--qr-bg-1; --qr-bg-2; --qr-bg-3;
+--qr-text-1; --qr-text-2;
+--qr-accent; --qr-accent-hover;
+--qr-border-1; --qr-border-2;
+--qr-card-bg; --qr-btn-bg;
 ```
+
+## 8. 目录与分层
+
+```text
 src/快速回复管理器/
-├── types.ts          # 类型定义 (Core)
-├── constants.ts      # 常量定义 (Core)
-├── store.ts          # 状态管理 (Core)
-├── styles/           # SCSS样式
-│   ├── _base.scss
-│   ├── _components.scss
-│   ├── _animations.scss
-│   └── _themes.scss
-├── utils/            # 工具函数
-│   ├── dom.ts
-│   ├── data.ts
-│   └── validation.ts
-├── services/         # 服务层
-│   ├── storage.ts
-│   ├── llm.ts
-│   └── theme.ts
-├── features/         # 功能模块
-│   ├── categories.ts
-│   ├── items.ts
-│   └── import-export.ts
-├── ui/               # UI层
-│   ├── components.ts
-│   ├── workbench.ts
-│   └── events.ts
-└── index.ts          # 入口文件
+├── types.ts
+├── constants.ts
+├── store.ts
+├── styles/
+├── utils/
+├── services/
+├── features/
+├── ui/
+└── index.ts
 ```
 
-### 架构原则
+依赖方向：`Core -> Utils -> Services -> Features -> UI -> Entry`
 
-- **单一职责**: 每个模块只负责一个功能领域
-- **依赖方向**: Core → Utils → Services → Features → UI → Entry
-- **状态管理**: 模块级单例，不引入外部状态库
-- **向后兼容**: 保持原有数据格式和 CSS 类名
+分层原则：
 
-## 自动化测试
+- 单一职责
+- 依赖单向
+- 状态集中（模块级单例）
+- 保持数据格式与 CSS 类名向后兼容
 
-使用 **agent-browser** 对快速回复管理器进行端到端测试。
+## 9. 调试建议
 
-### 环境准备
+推荐日志方法：
 
-安装 agent-browser:
+```typescript
+pushDebugLog('消息', payload);
+logInfo('INFO 消息', payload);
+logError('ERROR 消息', payload);
+```
+
+排查顺序：
+
+1. 先看脚本是否加载与初始化
+2. 再看变量读写是否成功
+3. 最后看 UI 事件绑定与样式覆盖
+
+## 10. 自动化测试（agent-browser）
+
+### 10.1 环境准备
 
 ```bash
 npm install -g agent-browser
+pnpm watch
 ```
 
-Windows 用户需先启动 Chrome（带远程调试端口）：
+启动 SillyTavern 后端（项目同级目录）：
+
+```powershell
+..\SillyTavern\UpdateAndStart.bat
+```
+
+启动后确认可用：
+
+```powershell
+curl http://127.0.0.1:8000
+```
+
+如需连接本地 Chrome 远程调试：
 
 ```bash
-# 在另一个终端启动 Chrome（Git Bash）
 chrome --remote-debugging-port=9222 --no-sandbox --headless=new &
-
-# 验证调试端口是否可用
 curl http://127.0.0.1:9222/json/version
 ```
 
-**注意**：`--headless=new` 参数表示使用新的 headless 模式，如果需要可视化界面可以去掉此参数。
-
-### 测试流程
-
-#### 1. 连接酒馆网页
+### 10.2 最小测试流程
 
 ```bash
-# 连接到已运行的 Chrome
 agent-browser connect 9222
-
-# 导航到酒馆
-agent-browser navigate http://localhost:8000
-```
-
-#### 2. 打开快速回复管理器
-
-```bash
-# 获取页面快照查看元素引用
+agent-browser open http://127.0.0.1:8000
 agent-browser snapshot --interactive
-
-# 点击快速回复管理器按钮（根据实际 ref 调整）
-agent-browser click @e22
-```
-
-#### 3. 常用测试操作
-
-**点击元素**:
-
-```bash
-agent-browser click @e5
-```
-
-**填写表单**:
-
-```bash
-agent-browser fill @e10 "测试内容"
-```
-
-**截图对比**:
-
-```bash
+agent-browser click '@eXX'
 agent-browser screenshot result.png --full
-```
-
-**执行 JavaScript**:
-
-```bash
-agent-browser eval "document.title"
-```
-
-#### 4. 测试示例：完整测试流程
-
-```bash
-# 1. 连接浏览器（确保 Chrome 已启动）
-agent-browser connect 9222
-
-# 2. 导航到酒馆
-agent-browser navigate http://localhost:8000
-
-# 3. 查找快速回复管理器按钮
-agent-browser snapshot --interactive | grep "快速回复管理器"
-# 输出: - button "💌快速回复管理器" [ref=e22]
-
-# 4. 点击打开管理器
-agent-browser click @e22
-
-# 5. 点击分类（如剧情编排）
-agent-browser click @e10
-
-# 6. 进入子分类（如时间推进）
-agent-browser click @e11
-
-# 7. 点击条目（如推进到晚上）
-agent-browser click @e9
-
-# 8. 点击连接符按钮
-agent-browser click @e2  # "然后"
-
-# 9. 截图验证
-agent-browser screenshot test_result.png --full
-
-# 10. 关闭浏览器
 agent-browser close
 ```
 
-#### 5. 常用命令速查
+说明：`@eXX` 需按当前快照中的实际元素 ref 替换。
 
-| 命令                                       | 说明                  |
-| ------------------------------------------ | --------------------- |
-| `agent-browser connect 9222`               | 连接到已运行的 Chrome |
-| `agent-browser navigate <url>`             | 导航到指定网址        |
-| `agent-browser snapshot`                   | 获取完整页面快照      |
-| `agent-browser snapshot --interactive`     | 获取交互元素列表      |
-| `agent-browser click @e<N>`                | 点击指定元素          |
-| `agent-browser fill @e<N> "文本"`          | 填写输入框            |
-| `agent-browser screenshot file.png --full` | 全页截图              |
-| `agent-browser eval "JS代码"`              | 执行 JavaScript       |
-| `agent-browser close`                      | 关闭浏览器            |
+### 10.3 常用命令
 
-**提示**：使用 `agent-browser snapshot --interactive | grep "关键词"` 可以快速查找元素引用。
+- `agent-browser connect 9222`
+- `agent-browser open <url>`
+- `agent-browser snapshot --interactive`
+- `agent-browser click '@e<N>'`（PowerShell 推荐）
+- `agent-browser fill '@e<N>' "文本"`（PowerShell 推荐）
+- `agent-browser screenshot file.png --full`
+- `agent-browser eval "document.title"`
+- `agent-browser close`
 
-### 测试检查清单
+### 10.4 回归检查清单
 
-- [ ] 管理器窗口正常打开/关闭
-- [ ] 分类列表正确显示
-- [ ] 新建/编辑/删除快速回复
-- [ ] 拖拽排序功能正常
-- [ ] 导入/导出功能正常
-- [ ] 设置项保存生效
-- [ ] 主题切换正确应用
+- [ ] 面板正常打开/关闭
+- [ ] 分类与条目渲染正确
+- [ ] 新建/编辑/删除可用
+- [ ] 拖拽排序生效
+- [ ] 导入/导出可用
+- [ ] 设置保存并可恢复
+- [ ] 主题切换正确
 
-### 自动化测试辅助模块
+## 11. 测试辅助模块
 
-项目提供了专用的测试辅助模块：`src/快速回复管理器/test-automation.ts`
+测试辅助位于：`src/快速回复管理器/test-automation.ts`
 
-**导出函数**：
+常用函数：
 
-| 函数                           | 用途                                          |
-| ------------------------------ | --------------------------------------------- |
-| `clickQrmButton()`             | 点击快速回复管理器按钮                        |
-| `clickItem(idOrName)`          | 点击指定条目                                  |
-| `clickConnector(type)`         | 点击连接符（then/simultaneous/direct/custom） |
-| `openSettingsPanel()`          | 打开设置面板                                  |
-| `switchSettingsTab(name)`      | 切换设置标签                                  |
-| `closePanel(target)`           | 关闭面板                                      |
-| `getInputBoxContent()`         | 获取输入框内容                                |
-| `isPanelOpen()`                | 检查面板是否打开                              |
-| `captureScreenshot(opts)`      | 截图并记录日志                                |
-| `runTestWorkflow(name, steps)` | 执行完整测试流程                              |
+- `clickQrmButton()`
+- `clickItem(idOrName)`
+- `clickConnector(type)`
+- `openSettingsPanel()`
+- `switchSettingsTab(name)`
+- `closePanel(target)`
+- `getInputBoxContent()`
+- `isPanelOpen()`
+- `captureScreenshot(opts)`
+- `runTestWorkflow(name, steps)`
 
-**使用示例**：
+## 12. 明确禁止项（速查）
 
-```typescript
-import { clickQrmButton, clickItem, clickConnector } from './test-automation';
+- 禁止使用 `DOMContentLoaded`
+- 禁止使用 `unload`
+- 禁止 `as any` 与 `@ts-ignore`
+- 禁止空 `catch` 块
+- 禁止依赖 Node-only API
+- 禁止直接在 HTML 引本地脚本
 
-// 执行测试
-clickQrmButton();
-clickItem('打招呼');
-clickConnector('then');
-```
+## 13. 参考路径
 
-### Agent-Browser 优势
+- `@types/`：酒馆助手接口类型
+- `util/`：通用工具
+- `slash_command.txt`：STScript 命令参考
+- `.cursor/rules/`：Cursor 规则
 
-agent-browser 是 Vercel Labs 开发的浏览器自动化 CLI 工具：
+---
 
-| 特性       | Playwright MCP         | Agent-Browser              |
-| ---------- | ---------------------- | -------------------------- |
-| 上下文使用 | 完整 DOM               | Snapshot + Refs (减少 93%) |
-| 架构       | MCP Server             | Rust CLI + Node.js Daemon  |
-| 速度       | 中等                   | 更快 (原生 Rust)           |
-| 安装       | npx playwright install | npm i -g agent-browser     |
-| 配置复杂度 | 需 MCP 配置            | 零配置                     |
-| 适用场景   | CI/CD、复杂测试        | 本地开发、快速调试         |
-
-**推荐使用 agent-browser 进行本地开发和快速测试**。
-
-## 参考文件
-
-| 路径                | 说明                 |
-| ------------------- | -------------------- |
-| `@types/`           | 酒馆助手接口类型定义 |
-| `util/`             | 工具函数             |
-| `slash_command.txt` | STScript 命令列表    |
-| `.cursor/rules/`    | Cursor 编写规则      |
+维护建议：新增规则时优先补充“必须遵守”与“禁止项”，避免把 AGENTS.md 变成长篇教程。
