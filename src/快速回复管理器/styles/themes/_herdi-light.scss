@@ -1,0 +1,145 @@
+// Theme: herdi-light (晨光白 - Default Light)
+##{$OVERLAY_ID}[data-theme='herdi-light'],
+.fp-panel[data-theme='herdi-light'],
+.fp-modal[data-theme='herdi-light'] {
+  /* Layer 1 - Surface & Text */
+  --qr-bg-1: linear-gradient(180deg, #f9f6f0 0%, #f3eee5 100%);
+  --qr-bg-2: linear-gradient(180deg, #fbf8f3, #f6f0e6);
+  --qr-bg-3: #fff;
+  --qr-bg-input: #f5f0e6;
+  --qr-bg-hover: rgba(35, 31, 28, 0.08);
+  --qr-text-1: #1f2023;
+  --qr-text-2: #5a5148;
+  --qr-text-on-accent: #fff;
+  --qr-placeholder: rgba(31, 32, 35, 0.4);
+  /* Layer 2 - Border & Decoration */
+  --qr-border-1: rgba(27, 27, 30, 0.14);
+  --qr-border-2: rgba(26, 26, 30, 0.09);
+  --qr-accent: #1f2023;
+  --qr-accent-hover: #2a2b2f;
+  --qr-shadow: rgba(0, 0, 0, 0.3);
+  --qr-scrollbar: rgba(0, 0, 0, 0.15);
+  --qr-scrollbar-hover: rgba(0, 0, 0, 0.28);
+  /* Layer 3 - Component Specific */
+  --qr-topbar-bg: linear-gradient(180deg, #ffffff, #f5f2ea);
+  --qr-topbar-border: rgba(26, 26, 30, 0.1);
+  --qr-sidebar-bg: linear-gradient(180deg, #fbf8f3, #f6f0e6);
+  --qr-sidebar-border: rgba(26, 26, 30, 0.09);
+  --qr-main-bg: linear-gradient(180deg, #f8f4ec, #f3eee5);
+  --qr-menu-bg: #fff;
+  --qr-menu-border: rgba(24, 24, 27, 0.16);
+  --qr-menu-hover: #f1ece4;
+  --qr-modal-bg: linear-gradient(180deg, #ffffff, #f7f2e9);
+  --qr-modal-overlay: rgba(11, 12, 14, 0.52);
+  --qr-toast-bg: rgba(24, 24, 27, 0.92);
+  --qr-toast-border: rgba(255, 255, 255, 0.16);
+  --qr-toast-text: #faf8f4;
+  --qr-overlay-bg:
+    radial-gradient(1200px 520px at 12% 0%, rgba(255, 255, 255, 0.25), transparent 56%),
+    radial-gradient(1000px 560px at 92% 8%, rgba(244, 228, 204, 0.34), transparent 54%), rgba(10, 10, 12, 0.52);
+  --qr-bottom-bg: #f7f2e9;
+  --qr-path-bg: #f1ebe1;
+  /* Layer 4 - Semantic Tags/Buttons */
+  --qr-tag-bg: #e8f4f0;
+  --qr-tag-border: rgba(50, 140, 120, 0.25);
+  --qr-tag-text: #2a8068;
+  --qr-tag-inject-bg: #f6ebdc;
+  --qr-tag-inject-border: rgba(132, 88, 35, 0.28);
+  --qr-tag-inject-text: #845823;
+  --qr-breadcrumb-bg: transparent;
+  --qr-breadcrumb-text: #5a5148;
+  --qr-breadcrumb-sep: rgba(90, 81, 72, 0.4);
+  --qr-breadcrumb-hover-bg: rgba(31, 32, 35, 0.1);
+  --qr-tab-bg: #fff;
+  --qr-tab-border: rgba(24, 24, 27, 0.16);
+  --qr-tab-active-bg: #1f2023;
+  --qr-tab-active-text: #fff;
+  /* Tree Node */
+  --qr-tree-text: #423c34;
+  --qr-tree-active-bg: #1f2023;
+  --qr-tree-active-text: #fff;
+  /* Card */
+  --qr-card-bg: #fff;
+  --qr-card-border: rgba(24, 24, 27, 0.12);
+  --qr-card-border-hover: rgba(24, 24, 27, 0.28);
+  --qr-card-shadow: rgba(20, 20, 22, 0.06);
+  --qr-card-hover-shadow: rgba(20, 20, 22, 0.12);
+  --qr-excerpt-text: #8a7e72;
+  /* Button */
+  --qr-btn-bg: rgba(255, 255, 255, 0.9);
+  --qr-btn-border: rgba(23, 24, 28, 0.18);
+  --qr-btn-hover-bg: #fff;
+  --qr-btn-hover-border: rgba(23, 24, 28, 0.34);
+  --qr-btn-edge-hi: rgba(255, 255, 255, 0.16);
+  --qr-btn-edge-lo: rgba(0, 0, 0, 0.34);
+  --qr-btn-ring: rgba(255, 255, 255, 0.06);
+  /* Fav icon */
+  --qr-fav-color: #e05070;
+  /* Connector buttons - Orange (then) */
+  --qr-conn-orange-bg: linear-gradient(180deg, #ffe8cf, #f9dbb8);
+  --qr-conn-orange-border: rgba(170, 112, 42, 0.35);
+  --qr-conn-orange-text: #7e4e16;
+  --qr-conn-orange-hover-bg: linear-gradient(180deg, #ffe2c2, #f5d0a6);
+  --qr-conn-orange-hover-border: rgba(170, 112, 42, 0.5);
+  /* Connector buttons - Purple (simul) */
+  --qr-conn-purple-bg: linear-gradient(180deg, #efe9ff, #dfd3ff);
+  --qr-conn-purple-border: rgba(92, 77, 155, 0.35);
+  --qr-conn-purple-text: #4b3a8a;
+  --qr-conn-purple-hover-bg: linear-gradient(180deg, #e8e0ff, #d3c3ff);
+  --qr-conn-purple-hover-border: rgba(92, 77, 155, 0.52);
+  /* Connector buttons - Green */
+  --qr-conn-green-bg: linear-gradient(180deg, #e4f5e9, #ceebd6);
+  --qr-conn-green-border: rgba(50, 130, 80, 0.3);
+  --qr-conn-green-text: #2d6b42;
+  --qr-conn-green-hover-bg: linear-gradient(180deg, #d8f0df, #c2e5cc);
+  --qr-conn-green-hover-border: rgba(50, 130, 80, 0.45);
+  /* Connector buttons - Blue */
+  --qr-conn-blue-bg: linear-gradient(180deg, #e0eeff, #cce0ff);
+  --qr-conn-blue-border: rgba(50, 90, 170, 0.3);
+  --qr-conn-blue-text: #2a5090;
+  --qr-conn-blue-hover-bg: linear-gradient(180deg, #d4e6ff, #c0d8ff);
+  --qr-conn-blue-hover-border: rgba(50, 90, 170, 0.45);
+  /* Connector buttons - Red */
+  --qr-conn-red-bg: linear-gradient(180deg, #ffe4e4, #fcd2d2);
+  --qr-conn-red-border: rgba(170, 50, 50, 0.3);
+  --qr-conn-red-text: #8b3030;
+  --qr-conn-red-hover-bg: linear-gradient(180deg, #ffd8d8, #f8c4c4);
+  --qr-conn-red-hover-border: rgba(170, 50, 50, 0.45);
+  /* Connector buttons - Teal/Cyan */
+  --qr-conn-teal-bg: linear-gradient(180deg, #e0f6f6, #cceded);
+  --qr-conn-teal-border: rgba(40, 130, 140, 0.3);
+  --qr-conn-teal-text: #1a6e70;
+  --qr-conn-teal-hover-bg: linear-gradient(180deg, #d4f0f0, #c0e6e6);
+  --qr-conn-teal-hover-border: rgba(40, 130, 140, 0.45);
+  /* Compact mode buttons */
+  --qr-compact-cat-bg: linear-gradient(180deg, #f0f7f4, #e6f0eb);
+  --qr-compact-cat-border: rgba(60, 120, 90, 0.22);
+  --qr-compact-cat-text: #2d5a42;
+  --qr-compact-cat-hover-bg: linear-gradient(180deg, #e8f2ec, #dceae3);
+  --qr-compact-cat-hover-border: rgba(60, 120, 90, 0.38);
+  --qr-compact-fav-bg: linear-gradient(180deg, #fef0f2, #fce4e8);
+  --qr-compact-fav-border: rgba(158, 69, 90, 0.22);
+  --qr-compact-fav-text: #9e455a;
+  --qr-compact-inject-bg: linear-gradient(180deg, #fef3e6, #fceacd);
+  --qr-compact-inject-border: rgba(132, 88, 35, 0.22);
+  --qr-compact-inject-text: #845823;
+  --qr-compact-header-bg: rgba(255, 255, 255, 0.4);
+  --qr-compact-header-text: #4f463d;
+  --qr-compact-group-text: #8a7e72;
+  --qr-compact-sep: rgba(26, 26, 30, 0.08);
+  /* Token styles */
+  --qr-token-item-bg: #f1ebe2;
+  --qr-token-item-border: rgba(26, 26, 30, 0.14);
+  --qr-token-item-text: #3c342c;
+  --qr-token-then-bg: #ffe6c9;
+  --qr-token-then-border: rgba(170, 112, 42, 0.34);
+  --qr-token-then-text: #7e4e16;
+  --qr-token-simul-bg: #ece7ff;
+  --qr-token-simul-border: rgba(92, 77, 155, 0.34);
+  --qr-token-simul-text: #4b3a8a;
+  --qr-token-raw-bg: #ececec;
+  --qr-token-raw-border: rgba(105, 105, 110, 0.28);
+  --qr-token-raw-text: #4a4a4f;
+  /* Row label */
+  --qr-row-label: #5d544b;
+}

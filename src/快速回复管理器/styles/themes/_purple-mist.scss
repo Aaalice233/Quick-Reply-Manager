@@ -1,0 +1,63 @@
+// === Theme: purple-mist (薰衣紫 - Purple Light) ===
+##{$OVERLAY_ID}[data-theme='purple-mist'],
+.fp-panel[data-theme='purple-mist'],
+.fp-modal[data-theme='purple-mist'] {
+  --qr-bg-1: linear-gradient(180deg, #f4f0fa 0%, #ebe4f4 100%);
+  --qr-bg-2: linear-gradient(180deg, #faf8fc, #f0eaf6);
+  --qr-bg-3: #fcfaff;
+  --qr-bg-input: #f0ecf6;
+  --qr-bg-hover: rgba(120, 90, 160, 0.08);
+  --qr-text-1: #3a2848;
+  --qr-text-2: #5a4868;
+  --qr-text-on-accent: #fff;
+  --qr-placeholder: rgba(58, 40, 72, 0.4);
+  --qr-border-1: rgba(120, 90, 160, 0.18);
+  --qr-border-2: rgba(120, 90, 160, 0.12);
+  --qr-accent: #8a6ab0;
+  --qr-accent-hover: #9a7ac0;
+  --qr-shadow: rgba(60, 40, 80, 0.22);
+  --qr-scrollbar: rgba(120, 90, 160, 0.18);
+  --qr-scrollbar-hover: rgba(120, 90, 160, 0.32);
+  --qr-topbar-bg: linear-gradient(180deg, #faf8fc, #f0eaf6);
+  --qr-topbar-border: rgba(120, 90, 160, 0.12);
+  --qr-sidebar-bg: #f6f2fa;
+  --qr-sidebar-border: rgba(120, 90, 160, 0.12);
+  --qr-main-bg: #f6f2fa;
+  --qr-menu-bg: #fcfaff;
+  --qr-menu-border: rgba(120, 90, 160, 0.16);
+  --qr-menu-hover: rgba(120, 90, 160, 0.08);
+  --qr-modal-bg: linear-gradient(180deg, #faf8fc, #f6f2fa);
+  --qr-modal-overlay: rgba(40, 20, 50, 0.45);
+  --qr-bottom-bg: #f6f2fa;
+  --qr-path-bg: #f0eaf6;
+  --qr-tab-bg: #f0eaf6;
+  --qr-tab-border: rgba(120, 90, 160, 0.18);
+  --qr-tab-active-bg: #8a6ab0;
+  --qr-tab-active-text: #fff;
+  --qr-tree-text: #4a3858;
+  --qr-tree-active-bg: #8a6ab0;
+  --qr-tree-active-text: #fff;
+  --qr-card-bg: #fcfaff;
+  --qr-card-border: rgba(120, 90, 160, 0.14);
+  --qr-card-shadow: rgba(60, 40, 80, 0.08);
+  --qr-card-hover-shadow: rgba(60, 40, 80, 0.16);
+  --qr-excerpt-text: #9a8ab0;
+  --qr-btn-bg: #f0eaf6;
+  --qr-btn-border: rgba(120, 90, 160, 0.22);
+  --qr-btn-hover-bg: #fff;
+  --qr-btn-hover-border: rgba(120, 90, 160, 0.36);
+  --qr-compact-cat-bg: linear-gradient(180deg, #eaf4f0, #e4f0ea);
+  --qr-compact-cat-border: rgba(70, 130, 100, 0.22);
+  --qr-compact-cat-text: #2a6048;
+  --qr-compact-fav-bg: linear-gradient(180deg, #f8eaf0, #f4e0ea);
+  --qr-compact-fav-border: rgba(160, 80, 120, 0.22);
+  --qr-compact-fav-text: #a05078;
+  --qr-compact-inject-bg: linear-gradient(180deg, #f8f2e8, #f4eade);
+  --qr-compact-inject-border: rgba(140, 110, 60, 0.22);
+  --qr-compact-inject-text: #8a6a30;
+  --qr-compact-header-bg: rgba(246, 242, 250, 0.6);
+  --qr-compact-header-text: #4a3858;
+  --qr-compact-group-text: #7a6888;
+  --qr-compact-sep: rgba(120, 90, 160, 0.12);
+  --qr-row-label: #5a4868;
+}
