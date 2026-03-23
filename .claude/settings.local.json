@@ -1,8 +1,5 @@
 {
   "permissions": {
-    "allow": [
-      "mcp__plugin_serena_serena__list_memories",
-      "Skill(autoplan)"
-    ]
+    "allow": []
   }
 }
