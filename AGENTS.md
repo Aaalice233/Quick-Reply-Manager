@@ -277,6 +277,23 @@ agent-browser close
 agent-browser screenshot test/screenshots/agent-browser/20260323-1105-open-panel-after-click.png --full
 ```
 
+### 10.6 临时文件规范（必须遵守）
+
+- 所有测试中间文件（如 `.tmp_*.txt`）统一放到：`test/tmp/`
+- 禁止在项目根目录、`src/` 等业务目录直接落地 `.tmp*` 文件
+- 临时文件命名建议：`.tmp-<case>-<step>.txt` 或 `.tmp_<case>_<step>.txt`
+- 测试结束后应清理无用临时文件
+
+推荐命令：
+
+```powershell
+# 写入临时快照
+agent-browser snapshot --interactive > test/tmp/.tmp-qrm-snapshot.txt
+
+# 清理临时文件
+Remove-Item test/tmp/.tmp* -Force
+```
+
 ## 11. 测试辅助模块
 
 测试辅助位于：`src/快速回复管理器/test-automation.ts`
