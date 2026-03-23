@@ -339,7 +339,7 @@ Final Verification (Wave 9)
 
   **Commit**: `refactor(modal): 提取条目模态框`
 
-- [ ] 10. 创建 features/modal/settings-modal.ts
+- [x] 10. 创建 features/modal/settings-modal.ts
 
   **What to do**:
   - 提取设置模态框：所有设置面板逻辑

@@ -10,7 +10,9 @@ export type { ModalOptions, ModalContentFactory } from '../../ui/components';
 // 条目编辑模态框
 export { showEditItemModal } from './item-modal';
 
+// 设置模态框
+export { showSettingsModal } from './settings-modal';
+
 // TODO: Task 9-11 将在这里添加更多导出
 // export { showCategoryModal } from './category-modal';
-// export { showSettingsModal } from './settings-modal';
 // export { showImportExportModal } from './import-modal';

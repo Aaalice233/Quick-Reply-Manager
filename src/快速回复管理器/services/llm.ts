@@ -865,7 +865,7 @@ export async function fetchQrLlmModels(secret: QrLlmSecretConfig): Promise<strin
 // 生成
 // ============================================================================
 
-function parseAdditionalBodyParams(raw: string): Record<string, unknown> {
+export function parseAdditionalBodyParams(raw: string): Record<string, unknown> {
   const text = String(raw || '').trim();
   if (!text) return {};
   try {
