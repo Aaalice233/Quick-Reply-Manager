@@ -4,7 +4,6 @@
  */
 
 import cssContent from '../styles/index.scss?raw';
-// @ts-expect-error webpack raw-loader
 import { STYLE_ID } from '../constants';
 import { state } from '../store';
 import { resolveHostWindow } from '../utils/dom';

@@ -202,7 +202,6 @@ import {
   handleCategoryClick,
   handleItemClick,
   handleContextMenu,
-  runSnapshotReorderDrag,
   bindWorkbenchEvents,
   unbindWorkbenchEvents,
   addTouchLongPress,
@@ -210,58 +209,6 @@ import {
   currentDragData,
   cleanupDrag,
 } from './ui/events';
-
-// ============================================================================
-// 本地辅助函数
-// ============================================================================
-
-function resolvePlaceholdersWithMap(
-  text: string,
-  placeholders: Record<string, string>,
-  roleValues?: Record<string, string> | null,
-): string {
-  return String(text || '').replace(/\{@([^:}]+)(?::([^}]*))?\}/g, (_, key: string, fallback: string) => {
-    const roleValue = roleValues?.[key];
-    if (roleValue !== undefined && String(roleValue).length > 0) return String(roleValue);
-    const defaultValue = placeholders[key];
-    if (defaultValue !== undefined && String(defaultValue).length > 0) return String(defaultValue);
-    return fallback !== undefined ? String(fallback) : '';
-  });
-}
-
-function parseAdditionalBodyParams(raw: string): Record<string, unknown> {
-  const text = String(raw || '').trim();
-  if (!text) return {};
-  try {
-    const parsed = JSON.parse(text);
-    if (!isPlainObject(parsed)) throw new Error('附加参数必须是对象');
-    return parsed;
-  } catch (e) {
-    const parsedYaml = parseSimpleYamlObject(text);
-    if (!isPlainObject(parsedYaml)) throw new Error('附加参数必须是对象');
-    return parsedYaml;
-  }
-}
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === 'object' && !Array.isArray(v) && Object.prototype.toString.call(v) === '[object Object]';
-}
-
-function parseSimpleYamlObject(text: string): Record<string, unknown> | null {
-  const lines = String(text || '').split(/\r?\n/);
-  const result: Record<string, unknown> = {};
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const idx = trimmed.indexOf(':');
-    if (idx === -1) continue;
-    const key = trimmed.slice(0, idx).trim();
-    const val = trimmed.slice(idx + 1).trim();
-    if (!key) continue;
-    result[key] = val;
-  }
-  return Object.keys(result).length > 0 ? result : null;
-}
 
 // ============================================================================
 // 全局变量

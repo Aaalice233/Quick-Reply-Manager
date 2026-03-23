@@ -253,8 +253,8 @@ export function createItemCardDragStrategy(item: Item, onTreeRefresh?: () => voi
       // 获取宿主文档
       let pD: Document;
       try {
-        const pW = (window as any).parent || window;
-        pD = (pW as Window).document || document;
+        const pW = window.parent as typeof window;
+        pD = pW.document || document;
       } catch {
         pD = document;
       }
