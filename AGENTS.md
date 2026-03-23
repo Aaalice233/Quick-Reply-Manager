@@ -236,7 +236,7 @@ agent-browser connect 9222
 agent-browser open http://127.0.0.1:8000
 agent-browser snapshot --interactive
 agent-browser click '@eXX'
-agent-browser screenshot result.png --full
+agent-browser screenshot test/screenshots/agent-browser/result.png --full
 agent-browser close
 ```
 
@@ -249,7 +249,7 @@ agent-browser close
 - `agent-browser snapshot --interactive`
 - `agent-browser click '@e<N>'`（PowerShell 推荐）
 - `agent-browser fill '@e<N>' "文本"`（PowerShell 推荐）
-- `agent-browser screenshot file.png --full`
+- `agent-browser screenshot test/screenshots/agent-browser/<name>.png --full`
 - `agent-browser eval "document.title"`
 - `agent-browser close`
 
@@ -262,6 +262,20 @@ agent-browser close
 - [ ] 导入/导出可用
 - [ ] 设置保存并可恢复
 - [ ] 主题切换正确
+
+### 10.5 测试截图规范（必须遵守）
+
+- 所有自动化测试截图统一存放在：`test/screenshots/agent-browser/`
+- 禁止把测试截图放在项目根目录或业务源码目录（如 `src/`）
+- 命名格式：`YYYYMMDD-HHmm-<case>-<step>.png`
+- 例如：`20260323-1105-open-panel-after-click.png`
+- 提交前应删除无意义临时截图（如 `tmp.png`、`test.png`）
+
+推荐命令：
+
+```bash
+agent-browser screenshot test/screenshots/agent-browser/20260323-1105-open-panel-after-click.png --full
+```
 
 ## 11. 测试辅助模块
 
