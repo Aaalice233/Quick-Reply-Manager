@@ -890,8 +890,8 @@ function showSettingsModal(): void {
               </div>
             </div>
             <div class="fp-tab" data-tab="advanced">
-              <div class="fp-row"><label>Toast堆叠上限</label><input data-toast-max type="number" min="1" max="8" value="${Number(toastSettings.maxStack || 4)}" /></div>
-              <div class="fp-row"><label>Toast时长(ms)</label><input data-toast-timeout type="number" min="600" max="8000" step="100" value="${Number(toastSettings.timeout || 1800)}" /></div>
+              <div class="fp-row"><label>Toast堆叠上限</label><input class="fp-input" data-toast-max type="number" min="1" max="8" value="${Number(toastSettings.maxStack || 4)}" /></div>
+              <div class="fp-row"><label>Toast时长(ms)</label><input class="fp-input" data-toast-timeout type="number" min="600" max="8000" step="100" value="${Number(toastSettings.timeout || 1800)}" /></div>
             </div>
             <div class="fp-tab fp-tab-debug" data-tab="debug">
               <div style="font-size:12px;color:var(--qr-text-2);margin-bottom:8px">实时显示当前脚本日志（包含发送给AI的实际消息内容）</div>
@@ -904,15 +904,15 @@ function showSettingsModal(): void {
             </div>
             <div class="fp-tab" data-tab="qr-llm-api">
               <div style="font-size:12px;color:var(--qr-text-2);margin-bottom:8px">OpenAI兼容配置（通过酒馆后端代理调用，敏感信息不会随导出导出）</div>
-              <div class="fp-row fp-qr-api-row"><label>API URL</label><input data-qr-api-url value="${localQrLlmSecret.url || ''}" placeholder="如：https://api.openai.com/v1" /></div>
-              <div class="fp-row fp-qr-api-row"><label>API Key</label><input data-qr-api-key type="password" value="${localQrLlmSecret.apiKey || ''}" placeholder="sk-..." /></div>
+              <div class="fp-row fp-qr-api-row"><label>API URL</label><input class="fp-input" data-qr-api-url value="${localQrLlmSecret.url || ''}" placeholder="如：https://api.openai.com/v1" /></div>
+              <div class="fp-row fp-qr-api-row"><label>API Key</label><input class="fp-input" data-qr-api-key type="password" value="${localQrLlmSecret.apiKey || ''}" placeholder="sk-..." /></div>
               <div class="fp-row fp-qr-api-row"><label>模型列表</label>
                 <div style="display:flex;gap:6px;flex:1">
                   <select data-qr-model-select style="flex:1;min-width:0"></select>
                   <button class="fp-btn" data-qr-load-models style="flex:0 0 auto">拉取模型列表</button>
                 </div>
               </div>
-              <div class="fp-row fp-qr-api-row"><label>模型ID</label><input data-qr-model-manual value="${localQrLlmSecret.manualModelId || localQrLlmSecret.model || ''}" placeholder="可手动填写模型ID" /></div>
+              <div class="fp-row fp-qr-api-row"><label>模型ID</label><input class="fp-input" data-qr-model-manual value="${localQrLlmSecret.manualModelId || localQrLlmSecret.model || ''}" placeholder="可手动填写模型ID" /></div>
               <div class="fp-row fp-row-block fp-qr-api-row"><label>附加参数</label>
                 <div style="flex:1;display:flex;flex-direction:column;gap:6px">
                   <textarea class="fp-textarea" data-qr-extra-body-params placeholder="可选，附加到请求体。支持JSON或简易YAML。例如：&#10;reasoning:&#10;  enabled: false&#10;  effort: none&#10;thinking:&#10;  type: disabled"></textarea>
@@ -936,11 +936,11 @@ function showSettingsModal(): void {
                   </label>
                 </div>
                 <div class="fp-qr-params-grid">
-                  <div class="fp-qr-param-item"><label>temperature</label><input data-qr-temperature type="number" step="0.1" min="0" max="2" value="${Number(localQrLlmSettings.generationParams.temperature ?? 1)}" /></div>
-                  <div class="fp-qr-param-item"><label>top_p</label><input data-qr-top-p type="number" step="0.05" min="0" max="1" value="${Number(localQrLlmSettings.generationParams.top_p ?? 1)}" /></div>
-                  <div class="fp-qr-param-item"><label>max_tokens</label><input data-qr-max-tokens type="number" step="1" min="16" max="8192" value="${Number(localQrLlmSettings.generationParams.max_tokens ?? 8192)}" /></div>
-                  <div class="fp-qr-param-item"><label>presence_penalty</label><input data-qr-presence type="number" step="0.1" min="-2" max="2" value="${Number(localQrLlmSettings.generationParams.presence_penalty ?? 0)}" /></div>
-                  <div class="fp-qr-param-item"><label>frequency_penalty</label><input data-qr-frequency type="number" step="0.1" min="-2" max="2" value="${Number(localQrLlmSettings.generationParams.frequency_penalty ?? 0)}" /></div>
+                  <div class="fp-qr-param-item"><label>temperature</label><input class="fp-input" data-qr-temperature type="number" step="0.1" min="0" max="2" value="${Number(localQrLlmSettings.generationParams.temperature ?? 1)}" /></div>
+                  <div class="fp-qr-param-item"><label>top_p</label><input class="fp-input" data-qr-top-p type="number" step="0.05" min="0" max="1" value="${Number(localQrLlmSettings.generationParams.top_p ?? 1)}" /></div>
+                  <div class="fp-qr-param-item"><label>max_tokens</label><input class="fp-input" data-qr-max-tokens type="number" step="1" min="16" max="8192" value="${Number(localQrLlmSettings.generationParams.max_tokens ?? 8192)}" /></div>
+                  <div class="fp-qr-param-item"><label>presence_penalty</label><input class="fp-input" data-qr-presence type="number" step="0.1" min="-2" max="2" value="${Number(localQrLlmSettings.generationParams.presence_penalty ?? 0)}" /></div>
+                  <div class="fp-qr-param-item"><label>frequency_penalty</label><input class="fp-input" data-qr-frequency type="number" step="0.1" min="-2" max="2" value="${Number(localQrLlmSettings.generationParams.frequency_penalty ?? 0)}" /></div>
                 </div>
               </div>
             </div>
@@ -1330,7 +1330,7 @@ function showSettingsModal(): void {
             segCard.innerHTML = `
             <div class="fp-modal-title">编辑</div>
             <div class="fp-seg-edit-grid">
-              <div class="fp-row"><label>姓名</label><input data-seg-note placeholder="例如：Main Prompt / 系统段 / 用户段" /></div>
+              <div class="fp-row"><label>姓名</label><input class="fp-input" data-seg-note placeholder="例如：Main Prompt / 系统段 / 用户段" /></div>
               <div class="fp-row"><label>角色</label>
                 <select data-seg-role>
                   <option value="SYSTEM" ${safeRole === 'SYSTEM' ? 'selected' : ''}>系统</option>
@@ -2216,8 +2216,8 @@ seed: -1`;
           const row = pD.createElement('div');
           row.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:6px';
           row.innerHTML = `
-            <input data-conn-label="${idx}" value="${escapeHtml(conn.label)}" placeholder="名称" style="width:80px;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px;text-align:center" />
-            <input data-conn-token="${idx}" value="${escapeHtml(conn.token)}" placeholder="插入内容" style="flex:1;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px" />
+            <input class="fp-input" data-conn-label="${idx}" value="${escapeHtml(conn.label)}" placeholder="名称" style="width:80px;text-align:center" />
+            <input class="fp-input" data-conn-token="${idx}" value="${escapeHtml(conn.token)}" placeholder="插入内容" style="flex:1;min-width:0" />
             <div data-conn-color-picker="${idx}" style="display:flex;align-items:center"></div>
             <button class="fp-btn icon-only" data-del-conn="${idx}" title="删除" style="padding:4px 8px;font-size:14px;color:#c44">✕</button>
           `;
@@ -2684,7 +2684,7 @@ seed: -1`;
           const currentValue = String(localRoleValues[ph.key] || '');
           const defaultValue = String(ph.defaultValue || ph.key || '');
           row.innerHTML = `
-            <input data-cph-key="${idx}" value="${escapeHtml(ph.key)}" placeholder="键名" style="width:100px;padding:6px 8px;border:1px solid rgba(24,24,27,.18);border-radius:8px;font-size:12px" />
+            <input class="fp-input" data-cph-key="${idx}" value="${escapeHtml(ph.key)}" placeholder="键名" style="width:100px" />
             <div data-cph-picker="${idx}" style="flex:1"></div>
             <input type="hidden" data-cph-picked="${idx}" />
             <button type="button" class="fp-btn icon-only" data-cph-edit-default="${idx}" title="编辑默认值">${iconSvg('pencil')}</button>
@@ -3734,7 +3734,7 @@ function openImportSelectionModal(
     card.innerHTML = `
       <div class="fp-modal-title">🧩 导入前勾选</div>
       <div style="font-size:12px;color:#a7c8bc;margin-bottom:10px">先选择要导入的分类和条目，再进入冲突处理。</div>
-      <div class="fp-row"><label>筛选</label><input data-filter placeholder="按名称筛选..." /></div>
+      <div class="fp-row"><label>筛选</label><input class="fp-input" data-filter placeholder="按名称筛选..." /></div>
       <div class="fp-actions" style="justify-content:flex-start;margin-top:0">
         <button data-all>全选</button>
         <button data-none>全不选</button>
@@ -3872,7 +3872,7 @@ function openConflictResolutionModal(
             <option value="rename">重命名导入</option>
           </select>
         </div>
-        <div class="fp-row"><label>新名称</label><input data-rename="${idx}" placeholder="仅在重命名时使用" /></div>
+        <div class="fp-row"><label>新名称</label><input class="fp-input" data-rename="${idx}" placeholder="仅在重命名时使用" /></div>
       `;
       list?.appendChild(row);
     });
