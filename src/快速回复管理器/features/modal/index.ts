@@ -13,6 +13,11 @@ export { showEditItemModal } from './item-modal';
 // 设置模态框
 export { showSettingsModal } from './settings-modal';
 
-// TODO: Task 9-11 将在这里添加更多导出
-// export { showCategoryModal } from './category-modal';
-// export { showImportExportModal } from './import-modal';
+// 导入导出模态框
+export {
+  openAdvancedImportModal,
+  openImportSelectionModal,
+  openConflictResolutionModal,
+  applyImport,
+  type ImportConflict,
+} from './import-modal';

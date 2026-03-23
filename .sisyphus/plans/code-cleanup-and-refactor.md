@@ -349,7 +349,7 @@ Final Verification (Wave 9)
 
   **Commit**: `refactor(modal): 提取设置模态框`
 
-- [ ] 11. 创建 features/modal/import-modal.ts
+- [x] 11. 创建 features/modal/import-modal.ts
 
   **What to do**:
   - 提取导入导出模态框
