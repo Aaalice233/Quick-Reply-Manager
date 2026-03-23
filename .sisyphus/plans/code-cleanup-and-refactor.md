@@ -414,7 +414,7 @@ Final Verification (Wave 9)
 
 ### Wave 4: 创建 ui/interactions/ 模块
 
-- [ ] 17. 创建 ui/interactions/index.ts
+- [x] 17. 创建 ui/interactions/index.ts
 
   **What to do**:
   - 提取事件绑定协调逻辑
