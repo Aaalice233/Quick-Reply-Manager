@@ -6,6 +6,7 @@
 
 import { OVERLAY_ID } from './constants';
 import { resolveHostWindow } from './utils/dom';
+import { truncateContent } from './utils/data';
 
 // ============================================================================
 // 类型定义
@@ -344,7 +345,7 @@ export function captureScreenshot(options: ScreenshotOptions): void {
     panelOpen,
     settingsOpen,
     inputContentLength: inputContent.length,
-    inputContentPreview: inputContent.slice(0, 100) + (inputContent.length > 100 ? '...' : ''),
+    inputContentPreview: truncateContent(inputContent, 100),
   };
 
   if (logToConsole) {

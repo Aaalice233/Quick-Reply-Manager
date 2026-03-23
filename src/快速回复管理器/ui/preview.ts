@@ -4,7 +4,8 @@
  */
 
 import { state } from '../store';
-import { escapeHtml } from '../utils/dom';
+import { escapeHtml, uid } from '../utils/dom';
+import { truncateContent } from '../utils/data';
 
 // ============================================================================
 // 类型定义
@@ -30,13 +31,6 @@ export interface PlaceholderValues {
 // ============================================================================
 // 内部辅助函数
 // ============================================================================
-
-/**
- * 生成唯一ID
- */
-function uid(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
-}
 
 /**
  * 连接器颜色映射
@@ -271,7 +265,7 @@ function buildPreviewTokensFromContent(content: string): PreviewToken[] {
   tokens.push({
     id: uid('tok'),
     type: 'raw',
-    label: text.slice(0, 20) + (text.length > 20 ? '…' : ''),
+    label: truncateContent(text, 20),
     text: text,
   });
 

@@ -1,18 +1,15 @@
 {
-  "active_plan": "C:\\Claude3\\Quick-Reply-Manager\\.sisyphus\\plans\\qr-manager-comprehensive-test-v2.md",
-  "started_at": "2026-03-21T12:42:26.283Z",
+  "active_plan": "C:\\Claude3\\Quick-Reply-Manager\\.sisyphus\\plans\\code-cleanup-and-refactor.md",
+  "started_at": "2026-03-23T09:00:45.587Z",
   "session_ids": [
-    "ses_2ef94ebf7ffekL0W2gZaMXYRQe",
-    "ses_2ef93d310ffeC62iT92H3s58HH",
-    "ses_2ef92e7caffebqRDdHT4aM4wZU",
-    "ses_2ef93e0f3ffeotczrok6LLBFyT",
-    "ses_2ef8ff2f5ffekxvz7f1yVy3G4b",
-    "ses_2ef8f8e3dffeUX1N2LN8zgyPnP",
-    "ses_2ef8f2244fferGp11plAJ08cF0",
-    "ses_2ef8e758affe3sxhxhMKqKHjB2",
-    "ses_2ef8df88affeLf7oVe6SLbkAio",
-    "ses_2ef8ed001ffefs7lE6wrMdwHwu"
+    "ses_2e613281dffeYTbHv1o3xLpCsN",
+    "ses_2e611463cffeXGHLD6LJcAyMV9",
+    "ses_2e61174e5ffegBCRQJ44qfZ9IO",
+    "ses_2e6111988ffexIcGy9MWOZ1OSG",
+    "ses_2e611a821ffe767tMmOoszaOgF",
+    "ses_2e610f508ffeVc4adQzcIbUXhB",
+    "ses_2e6084f69ffeXJFp59oYmeyFZv"
   ],
-  "plan_name": "qr-manager-comprehensive-test-v2",
+  "plan_name": "code-cleanup-and-refactor",
   "agent": "atlas"
 }

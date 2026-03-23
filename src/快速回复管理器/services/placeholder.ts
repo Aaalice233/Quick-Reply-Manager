@@ -6,18 +6,7 @@
 import { state } from '../store';
 import { logError } from './debug';
 import { invalidateEditGeneration } from './llm';
-
-// ============================================================================
-// 全局访问辅助函数
-// ============================================================================
-
-/**
- * 解析宿主窗口
- * @returns 父窗口对象
- */
-function resolveHostWindow(): Window {
-  return window.parent as Window;
-}
+import { resolveHostWindow } from '../utils/dom';
 
 /**
  * 获取酒馆上下文

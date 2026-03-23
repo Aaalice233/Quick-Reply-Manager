@@ -7,6 +7,7 @@ import type { Pack, PackMeta, Category, Item, Settings, UiState } from '../types
 import { state, updatePack } from '../store';
 import { DATA_VERSION, SCRIPT_LABEL, CONNECTOR_ONLY_KEYS } from '../constants';
 import { deepClone, nowIso } from '../utils/data';
+import { uid } from '../utils/dom';
 import { logError } from '../services/debug';
 import { toast } from '../ui/components';
 
@@ -73,21 +74,6 @@ function isValidItem(data: unknown): data is Item {
  */
 function isLegacyQrJson(data: unknown): data is { qrList: unknown[] } & Record<string, unknown> {
   return !!(data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).qrList));
-}
-
-// ============================================================================
-// UID生成
-// ============================================================================
-
-let uidCounter = 0;
-
-/**
- * 生成唯一ID
- * @param prefix ID前缀
- * @returns 唯一ID字符串
- */
-function uid(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}_${++uidCounter}`;
 }
 
 // ============================================================================

@@ -53,3 +53,17 @@ export function splitMultiValue(raw: string): string[] {
 export function joinMultiValue(values: string[]): string {
   return [...new Set((values || []).map(x => String(x || '').trim()).filter(Boolean))].join('、');
 }
+
+/**
+ * 截断内容文本
+ * @param content - 要截断的文本
+ * @param maxLen - 最大长度，默认60
+ * @returns 截断后的文本，超出部分用"…"表示
+ */
+export function truncateContent(content: string, maxLen = 60): string {
+  const raw = String(content || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (raw.length <= maxLen) return raw;
+  return raw.slice(0, maxLen) + '…';
+}

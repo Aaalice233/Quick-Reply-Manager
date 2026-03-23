@@ -6,6 +6,7 @@
 import { state, persistPack } from '../store';
 import { logError, logInfo } from '../services/debug';
 import { toast } from './components';
+import { uid, resolveHostWindow } from '../utils/dom';
 import type { Category, Item, DragData } from '../types';
 
 // ============================================================================
@@ -51,15 +52,6 @@ let suppressClicksUntil = 0;
 // ============================================================================
 
 /**
- * 生成唯一ID
- * @param prefix - ID前缀
- * @returns 唯一ID字符串
- */
-function uid(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
-}
-
-/**
  * 检查点击是否被抑制
  * @returns 如果点击被抑制返回true
  */
@@ -73,39 +65,6 @@ export function isClickSuppressed(): boolean {
  */
 export function suppressNextClick(ms = 220): void {
   suppressClicksUntil = Date.now() + ms;
-}
-
-/**
- * 获取宿主窗口
- * @returns Window对象
- */
-function resolveHostWindow(): Window {
-  const candidates: Window[] = [];
-  try {
-    if (window.top) candidates.push(window.top);
-  } catch {
-    /* ignore */
-  }
-  try {
-    if (window.parent) candidates.push(window.parent);
-  } catch {
-    /* ignore */
-  }
-  candidates.push(window);
-  let best: Window = window;
-  let bestArea = 0;
-  for (const w of candidates) {
-    try {
-      const area = Number(w.innerWidth || 0) * Number(w.innerHeight || 0);
-      if (area > bestArea && w.document) {
-        best = w;
-        bestArea = area;
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  return best;
 }
 
 /**

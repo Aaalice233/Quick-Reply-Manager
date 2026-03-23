@@ -6,7 +6,8 @@
 import type { Category, Item, DragData } from '../types';
 import { state, persistPack } from '../store';
 import { OVERLAY_ID, CONNECTOR_COLOR_HEX } from '../constants';
-import { resolveHostWindow, escapeHtml } from '../utils/dom';
+import { resolveHostWindow, escapeHtml, getViewportSize } from '../utils/dom';
+import { truncateContent } from '../utils/data';
 import { iconSvg, renderTopButton, toast } from './components';
 import { moveCategoryRelative } from '../features/categories';
 import { moveItem } from '../features/items';
@@ -15,6 +16,8 @@ import {
   createItemCardDragStrategy,
   scheduleTreeAutoExpand,
   unbindWorkbenchEvents,
+  isClickSuppressed,
+  suppressNextClick,
 } from './events';
 
 // ============================================================================
@@ -38,19 +41,6 @@ const pD = pW.document || document;
 // ============================================================================
 // 辅助函数
 // ============================================================================
-
-/**
- * 获取视口尺寸
- */
-function getViewportSize(): { width: number; height: number } {
-  const root = pD?.documentElement;
-  const w = Number(pW?.innerWidth) || Number(root?.clientWidth) || Number(window.innerWidth) || 320;
-  const h = Number(pW?.innerHeight) || Number(root?.clientHeight) || Number(window.innerHeight) || 360;
-  return {
-    width: Math.max(320, w),
-    height: Math.max(360, h),
-  };
-}
 
 /**
  * 根据ID获取分类
@@ -103,33 +93,6 @@ function getItemsByCategory(catId: string | null, includeDesc = true): Item[] {
   return state.pack.items
     .filter(i => (catId ? catIds.has(i.categoryId || '') : !i.categoryId))
     .sort((a, b) => a.order - b.order);
-}
-
-/**
- * 截断内容文本
- */
-function truncateContent(content: string, maxLen = 60): string {
-  const raw = String(content || '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (raw.length <= maxLen) return raw;
-  return raw.slice(0, maxLen) + '…';
-}
-
-/**
- * 检查点击是否被抑制
- */
-let clickSuppressed = false;
-function isClickSuppressed(): boolean {
-  return clickSuppressed;
-}
-
-/**
- * 抑制下一次点击
- */
-function suppressNextClick(ms = 220): void {
-  clickSuppressed = true;
-  setTimeout(() => (clickSuppressed = false), ms);
 }
 
 /**

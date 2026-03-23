@@ -8,6 +8,7 @@ import { QR_LLM_SECRET_KEY, DEFAULT_QR_LLM_PRESET_NAME, DEFAULT_QR_LLM_PRESET_VE
 import { state } from '../store';
 import { fetchWithTimeout } from '../utils/network';
 import { uid } from '../utils/dom';
+import { truncateContent } from '../utils/data';
 import { logError, pushDebugLog } from './debug';
 
 // ============================================================================
@@ -154,7 +155,7 @@ function sanitizeLlmReqBodyForLog(reqBody: Record<string, unknown>): Record<stri
       const content = String((msg as { content?: string }).content || '');
       return {
         role,
-        contentPreview: `${content.slice(0, 24)}${content.length > 24 ? '…' : ''}`,
+        contentPreview: truncateContent(content, 24),
         contentLength: content.length,
       };
     });
@@ -163,10 +164,9 @@ function sanitizeLlmReqBodyForLog(reqBody: Record<string, unknown>): Record<stri
 }
 
 function summarizeLlmOutputForLog(text: string): { preview: string; length: number } {
-  const raw = String(text || '');
-  const compact = raw.replace(/\s+/g, ' ').trim();
+  const compact = truncateContent(text, 180);
   return {
-    preview: compact.slice(0, 180) + (compact.length > 180 ? '…' : ''),
+    preview: compact,
     length: compact.length,
   };
 }

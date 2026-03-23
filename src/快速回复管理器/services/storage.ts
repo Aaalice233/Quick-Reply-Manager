@@ -14,6 +14,7 @@ import {
 } from '../constants';
 import { state, persistPack } from '../store';
 import { deepClone, parsePackUpdatedAtMs, nowIso } from '../utils/data';
+import { getViewportSize, uid } from '../utils/dom';
 import { logError } from './debug';
 
 // 重新导出 persistPack，保持向后兼容
@@ -30,29 +31,6 @@ interface ScriptStoreReadResult {
   hasStoredValue: boolean;
   parseFailed: boolean;
   source: 'script' | 'local' | null;
-}
-
-/**
- * 生成唯一ID
- * @param prefix - ID前缀
- * @returns 唯一标识符
- */
-function uid(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
-}
-
-/**
- * 获取视口尺寸
- * @returns 视口的宽度和高度
- */
-function getViewportSize(): { width: number; height: number } {
-  const root = document?.documentElement;
-  const w = Number(window?.innerWidth) || Number(root?.clientWidth) || 320;
-  const h = Number(window?.innerHeight) || Number(root?.clientHeight) || 360;
-  return {
-    width: Math.max(320, w),
-    height: Math.max(360, h),
-  };
 }
 
 /**

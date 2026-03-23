@@ -112,3 +112,18 @@ export function getInputBox(): HTMLTextAreaElement | null {
     return null;
   }
 }
+
+/**
+ * 获取视口尺寸
+ * @returns 视口的宽度和高度
+ */
+export function getViewportSize(): { width: number; height: number } {
+  const hostWindow = resolveHostWindow();
+  const root = hostWindow.document?.documentElement;
+  const w = Number(hostWindow?.innerWidth) || Number(root?.clientWidth) || Number(window.innerWidth) || 320;
+  const h = Number(hostWindow?.innerHeight) || Number(root?.clientHeight) || Number(window.innerHeight) || 360;
+  return {
+    width: Math.max(320, w),
+    height: Math.max(360, h),
+  };
+}
