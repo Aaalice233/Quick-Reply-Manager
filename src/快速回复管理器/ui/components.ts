@@ -6,6 +6,7 @@
 import { TOAST_CONTAINER_ID, OVERLAY_ID } from '../constants';
 import { resolveHostWindow } from '../utils/dom';
 import { logInfo } from '../services/debug';
+import { getCurrentTheme } from '../services/theme';
 
 // ============================================================================
 // 类型定义
@@ -17,6 +18,8 @@ import { logInfo } from '../services/debug';
 export interface ModalOptions {
   /** 是否替换现有模态框内容 (默认: true) */
   replace?: boolean;
+  /** 自定义卡片类名 */
+  cardClassName?: string;
 }
 
 /**
@@ -221,9 +224,14 @@ export function showModal(contentFactory: ModalContentFactory, opts?: ModalOptio
   modalWrapper = pD.createElement('div');
   modalWrapper.className = 'fp-modal';
 
+  // 应用当前主题
+  const currentTheme = getCurrentTheme();
+  modalWrapper.setAttribute('data-theme', currentTheme);
+
   // 创建模态框卡片容器
   const card = pD.createElement('div');
-  card.className = 'fp-modal-card';
+  const cardClassName = opts?.cardClassName || 'fp-modal-card';
+  card.className = cardClassName;
   card.appendChild(
     contentFactory(() => {
       executeModalCloseCallbacks();

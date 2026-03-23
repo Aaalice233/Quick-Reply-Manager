@@ -10,7 +10,8 @@ body {
 
 /* === CSS Variables Definition (herdi-light as default) === */
 ##{$OVERLAY_ID},
-.fp-panel {
+.fp-panel,
+.fp-modal {
   /* Layer 1 - Surface & Text */
   --qr-bg-1: linear-gradient(180deg, #f9f6f0 0%, #f3eee5 100%);
   --qr-bg-2: linear-gradient(180deg, #fbf8f3, #f6f0e6);

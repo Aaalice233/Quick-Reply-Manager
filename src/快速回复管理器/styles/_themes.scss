@@ -2,8 +2,9 @@
 // 提取自 index.ts 第2043-2674行
 
 // === Theme: ink-noir (墨夜黑 - Dark) ===
-##{$OVERLAY_ID}[data-theme="ink-noir"],
-.fp-panel[data-theme="ink-noir"] {
+##{$OVERLAY_ID}[data-theme='ink-noir'],
+.fp-panel[data-theme='ink-noir'],
+.fp-modal[data-theme='ink-noir'] {
   --qr-bg-1: linear-gradient(180deg, #16181d 0%, #121419 100%);
   --qr-bg-2: linear-gradient(180deg, #1c1f26, #16181d);
   --qr-bg-3: #1e232c;
@@ -33,7 +34,8 @@
   --qr-toast-bg: rgba(30, 35, 44, 0.95);
   --qr-toast-border: rgba(255, 255, 255, 0.12);
   --qr-toast-text: #e8edf5;
-  --qr-overlay-bg: radial-gradient(1200px 520px at 12% 0%, rgba(40, 50, 70, 0.35), transparent 56%),
+  --qr-overlay-bg:
+    radial-gradient(1200px 520px at 12% 0%, rgba(40, 50, 70, 0.35), transparent 56%),
     radial-gradient(1000px 560px at 92% 8%, rgba(30, 40, 60, 0.4), transparent 54%), rgba(8, 10, 14, 0.72);
   --qr-bottom-bg: #171a20;
   --qr-path-bg: #171a20;
@@ -125,8 +127,9 @@
 }
 
 // === Theme: sand-gold (沙金暖 - Warm Light) ===
-##{$OVERLAY_ID}[data-theme="sand-gold"],
-.fp-panel[data-theme="sand-gold"] {
+##{$OVERLAY_ID}[data-theme='sand-gold'],
+.fp-panel[data-theme='sand-gold'],
+.fp-modal[data-theme='sand-gold'] {
   --qr-bg-1: linear-gradient(180deg, #f6efe3 0%, #efe4d3 100%);
   --qr-bg-2: linear-gradient(180deg, #fff9ef, #f2e6d4);
   --qr-bg-3: #fffaf1;
@@ -181,8 +184,9 @@
 }
 
 // === Theme: rose-pink (樱粉柔 - Pink Light) ===
-##{$OVERLAY_ID}[data-theme="rose-pink"],
-.fp-panel[data-theme="rose-pink"] {
+##{$OVERLAY_ID}[data-theme='rose-pink'],
+.fp-panel[data-theme='rose-pink'],
+.fp-modal[data-theme='rose-pink'] {
   --qr-bg-1: linear-gradient(180deg, #fff0f3 0%, #fce8ec 100%);
   --qr-bg-2: linear-gradient(180deg, #fff8f9, #fceef2);
   --qr-bg-3: #fffbfc;
@@ -241,8 +245,9 @@
 }
 
 // === Theme: forest-green (翡翠绿 - Green Dark) ===
-##{$OVERLAY_ID}[data-theme="forest-green"],
-.fp-panel[data-theme="forest-green"] {
+##{$OVERLAY_ID}[data-theme='forest-green'],
+.fp-panel[data-theme='forest-green'],
+.fp-modal[data-theme='forest-green'] {
   --qr-bg-1: linear-gradient(180deg, #1a2e24 0%, #142820 100%);
   --qr-bg-2: linear-gradient(180deg, #1e3428, #1a2e24);
   --qr-bg-3: #1e3428;
@@ -359,8 +364,9 @@
 }
 
 // === Theme: ocean-blue (深海蓝 - Blue Dark) ===
-##{$OVERLAY_ID}[data-theme="ocean-blue"],
-.fp-panel[data-theme="ocean-blue"] {
+##{$OVERLAY_ID}[data-theme='ocean-blue'],
+.fp-panel[data-theme='ocean-blue'],
+.fp-modal[data-theme='ocean-blue'] {
   --qr-bg-1: linear-gradient(180deg, #141e2a 0%, #101824 100%);
   --qr-bg-2: linear-gradient(180deg, #18242e, #141e2a);
   --qr-bg-3: #18242e;
@@ -477,8 +483,9 @@
 }
 
 // === Theme: purple-mist (薰衣紫 - Purple Light) ===
-##{$OVERLAY_ID}[data-theme="purple-mist"],
-.fp-panel[data-theme="purple-mist"] {
+##{$OVERLAY_ID}[data-theme='purple-mist'],
+.fp-panel[data-theme='purple-mist'],
+.fp-modal[data-theme='purple-mist'] {
   --qr-bg-1: linear-gradient(180deg, #f4f0fa 0%, #ebe4f4 100%);
   --qr-bg-2: linear-gradient(180deg, #faf8fc, #f0eaf6);
   --qr-bg-3: #fcfaff;
