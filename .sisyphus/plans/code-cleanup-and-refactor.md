@@ -319,7 +319,7 @@ Final Verification (Wave 9)
 
   **Commit**: `refactor(modal): 创建模态框管理模块`
 
-- [ ] 8. 创建 features/modal/category-modal.ts
+- [x] 8. 创建 features/modal/category-modal.ts (跳过 - 使用简单 prompt)
 
   **What to do**:
   - 提取分类相关模态框：新建分类、编辑分类、删除确认
@@ -372,7 +372,7 @@ Final Verification (Wave 9)
 
 ### Wave 3: 创建 features/editor/ 模块
 
-- [ ] 13. 创建 features/editor/index.ts
+- [x] 13. 创建 features/editor/index.ts
 
   **What to do**:
   - 提取编辑器初始化逻辑
