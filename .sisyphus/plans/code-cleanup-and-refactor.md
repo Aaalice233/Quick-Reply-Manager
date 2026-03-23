@@ -304,7 +304,7 @@ Final Verification (Wave 9)
 
 ### Wave 2: 创建 features/modal/ 模块
 
-- [ ] 7. 创建 features/modal/index.ts - 模态框管理器
+- [x] 7. 创建 features/modal/index.ts - 模态框管理器
 
   **What to do**:
   - 从 `index.ts` 提取模态框显示/关闭逻辑（约200-300行）
