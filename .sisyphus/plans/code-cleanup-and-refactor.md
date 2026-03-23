@@ -329,7 +329,7 @@ Final Verification (Wave 9)
 
   **Commit**: `refactor(modal): 提取分类模态框`
 
-- [ ] 9. 创建 features/modal/item-modal.ts
+- [x] 9. 创建 features/modal/item-modal.ts
 
   **What to do**:
   - 提取条目相关模态框：新建条目、编辑条目、删除确认
